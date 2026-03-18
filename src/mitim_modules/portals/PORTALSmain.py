@@ -409,6 +409,8 @@ def runModelEvaluator(
             X[cont] = dictDVs[f"aL{ikey}_{ix+1}"]["value"]
             cont += 1
     X = X.unsqueeze(0)
+    
+    fidelity = dictDVs["fidelity"]["value"] if "fidelity" in dictDVs else 0.0
 
     # Ensure that the powerstate has the right dimensions
     powerstate._repeat_tensors(batch_size=X.shape[0])
@@ -421,7 +423,7 @@ def runModelEvaluator(
     powerstate.transport_options["cold_start"] = cold_start
 
     # Evaluate X (DVs) through powerstate.calculate(). This will populate .plasma with the results
-    powerstate.calculate(X, nameRun=name, folder=folder_model, evaluation_number=numPORTALS)
+    powerstate.calculate(X, nameRun=name, folder=folder_model, evaluation_number=numPORTALS, transport_model_fidelity=fidelity)
 
     # ---------------------------------------------------------------------------------------------------
     # Produce dictOFs

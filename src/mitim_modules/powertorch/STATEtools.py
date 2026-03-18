@@ -287,7 +287,7 @@ class powerstate:
     # ------------------------------------------------------------------
 
     def calculate(
-        self, X=None, nameRun="test", folder="~/scratch/", evaluation_number=0
+        self, X=None, nameRun="test", folder="~/scratch/", evaluation_number=0, transport_model_fidelity=0.0, 
     ):
         """
         Inputs:
@@ -313,6 +313,7 @@ class powerstate:
             nameRun=nameRun,
             folder=folder,
             evaluation_number=evaluation_number,
+            transport_model_fidelity=transport_model_fidelity
         )
 
         # 5. Residual powers
@@ -726,7 +727,7 @@ class powerstate:
             )
 
     def calculateTransport(
-        self, nameRun="test", folder="~/scratch/", evaluation_number=0):
+        self, nameRun="test", folder="~/scratch/", evaluation_number=0, transport_model_fidelity=0.0):
         """
         Update the transport of the current state.
         """
@@ -734,9 +735,9 @@ class powerstate:
 
         # Select transport evaluator
         if self.transport_options["evaluator"] is None:
-            transport = TRANSPORTtools.power_transport( self, name=nameRun, folder=folder, evaluation_number=evaluation_number )
+            transport = TRANSPORTtools.power_transport( self, name=nameRun, folder=folder, evaluation_number=evaluation_number, transport_model_fidelity=transport_model_fidelity )
         else:
-            transport = self.transport_options["evaluator"]( self, name=nameRun, folder=folder, evaluation_number=evaluation_number )
+            transport = self.transport_options["evaluator"]( self, name=nameRun, folder=folder, evaluation_number=evaluation_number, transport_model_fidelity= transport_model_fidelity )
         
         # The transport class may have instanciating attributes
         for key in self.transport_options["evaluator_instance_attributes"]:

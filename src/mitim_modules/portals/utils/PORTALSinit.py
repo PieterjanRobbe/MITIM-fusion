@@ -236,6 +236,8 @@ def initializeProblem(
             else:
                 dictDVs[name] = [fixed_gradients[name][0], base_gradient, fixed_gradients[name][1]]
 
+    dictDVs['fidelity'] = [torch.tensor(0), torch.tensor(0), torch.tensor(1)]
+
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Define output dictionaries
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~

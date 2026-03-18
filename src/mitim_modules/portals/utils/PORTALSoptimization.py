@@ -83,6 +83,9 @@ def initialization_simple_relax(self):
 
         shutil.copytree(MainFolder / newname / "transport_simulation_folder", ff / "transport_simulation_folder") #### delete first
 
+    # Add fidelity dimension (default to 0)
+    Xopt = torch.cat((Xopt, torch.zeros(Xopt.shape[0], 1).to(Xopt)), dim=1)
+
     return Xopt.cpu().numpy()
 
 """

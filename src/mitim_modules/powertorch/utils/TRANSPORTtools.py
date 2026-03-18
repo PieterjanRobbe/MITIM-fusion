@@ -84,12 +84,13 @@ def write_json(self, file_name = 'fluxes_turb.json', suffix= 'turb'):
 
 class power_transport:
 
-    def __init__(self, powerstate, name = "test", folder = "~/scratch/", evaluation_number = 0):
+    def __init__(self, powerstate, name = "test", folder = "~/scratch/", evaluation_number = 0, transport_model_fidelity = 0.0):
 
         self.name = name
         self.folder = IOtools.expandPath(folder)
         self.evaluation_number = evaluation_number
         self.powerstate = powerstate
+        self.transport_model_fidelity = transport_model_fidelity
 
         self.transport_evaluator_options  = self.powerstate.transport_options["options"]
         self.cold_start                   = self.powerstate.transport_options["cold_start"]
