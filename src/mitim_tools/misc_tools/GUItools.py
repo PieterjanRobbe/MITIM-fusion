@@ -56,6 +56,37 @@ from IPython import embed
 
 plt.rcParams["figure.max_open_warning"] = False
 
+
+def _sanitize_invalid_log_axes(fig):
+    """
+    Matplotlib can defer log-scale validation until savefig() redraws the figure.
+    If an axis is marked as log-scaled but its limits are non-positive, switch
+    that axis to linear so saving can proceed.
+    """
+
+    changed = False
+
+    for ax in fig.axes:
+        if ax.get_xscale() == "log":
+            try:
+                xmin, xmax = ax.get_xlim()
+                if (xmin <= 0) or (xmax <= 0):
+                    ax.set_xscale("linear")
+                    changed = True
+            except Exception:
+                pass
+
+        if ax.get_yscale() == "log":
+            try:
+                ymin, ymax = ax.get_ylim()
+                if (ymin <= 0) or (ymax <= 0):
+                    ax.set_yscale("linear")
+                    changed = True
+            except Exception:
+                pass
+
+    return changed
+
 class FigureNotebook:
     def __init__(
         self,
@@ -434,15 +465,36 @@ class FigureNotebook:
                 if fpath.exists():
                     fpath.unlink() 
                 
-                fig.savefig(
-                    fpath,
-                    format=fmt,
-                    dpi=dpi,
-                    bbox_inches=bbox_inches,
-                    pad_inches=pad_inches,
-                    transparent=transparent,
-                    **kwargs,
-                )
+                try:
+                    fig.savefig(
+                        fpath,
+                        format=fmt,
+                        dpi=dpi,
+                        bbox_inches=bbox_inches,
+                        pad_inches=pad_inches,
+                        transparent=transparent,
+                        **kwargs,
+                    )
+                except ValueError as exc:
+                    if "cannot be log-scaled" not in str(exc):
+                        raise
+
+                    if not _sanitize_invalid_log_axes(fig):
+                        raise
+
+                    print(
+                        f"\t\t- Figure required downgrading invalid log axes before saving",
+                        typeMsg="w",
+                    )
+                    fig.savefig(
+                        fpath,
+                        format=fmt,
+                        dpi=dpi,
+                        bbox_inches=bbox_inches,
+                        pad_inches=pad_inches,
+                        transparent=transparent,
+                        **kwargs,
+                    )
                 saved.append(fpath)
 
             print(f"- Saved {len(saved)} figure(s) to {out_dir}")

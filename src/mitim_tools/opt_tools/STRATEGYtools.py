@@ -592,6 +592,8 @@ class MITIM_BO:
                 "name_objectives": self.optimization_object.name_objectives,
                 "name_transformed_ofs": self.optimization_object.name_transformed_ofs,
                 "outputs": self.outputs,
+                "dvs_optimizer": getattr(self.optimization_object, "dvs_optimizer", None),
+                "dvs_context": getattr(self.optimization_object, "dvs_context", None),
             }
 
             self.optimization_results = BOgraphics.optimization_results(file=res_file)

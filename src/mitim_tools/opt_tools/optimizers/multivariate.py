@@ -10,12 +10,43 @@ def optimize_function(fun, optimization_params = {}, writeTrajectory=False, meth
     
     np.random.seed(fun.seed)
 
+    dv_names = fun.stepSettings["optimization_options"]["problem_options"].get("dvs", [])
+    dvs_optimizer = fun.stepSettings.get("dvs_optimizer", dv_names)
+
+    active_indices = [i for i, dv in enumerate(dv_names) if dv in dvs_optimizer]
+    inactive_indices = [i for i, dv in enumerate(dv_names) if dv not in dvs_optimizer]
+    optimize_in_active_subspace = len(active_indices) > 0 and len(active_indices) < len(dv_names)
+
+    x_reference_full = copy.deepcopy(fun.xGuesses[:1, :]) if fun.xGuesses is not None else None
+
+    def expand_active_to_full(X_active):
+        if not optimize_in_active_subspace:
+            return X_active
+
+        X_full = x_reference_full.repeat(X_active.shape[0], 1).clone()
+        X_full[:, active_indices] = X_active
+        return X_full
+
+    def expand_active_history_to_full(X_active_history):
+        if (not optimize_in_active_subspace) or (X_active_history is None) or (X_active_history.numel() == 0):
+            return X_active_history
+
+        shape = X_active_history.shape
+        X_full_history = x_reference_full.repeat(int(np.prod(shape[:-1])), 1).clone()
+        X_full_history[:, active_indices] = X_active_history.reshape(-1, shape[-1])
+        return X_full_history.view(*shape[:-1], x_reference_full.shape[-1])
+
+    def project_full_to_active(X_full):
+        if not optimize_in_active_subspace:
+            return X_full
+        return X_full[:, active_indices]
+
     # --------------------------------------------------------------------------------------------------------
     # Solver options
     # --------------------------------------------------------------------------------------------------------
 
     num_restarts = optimization_params.get("num_restarts", 1)
-    bounds = fun.bounds_mod
+    bounds = fun.bounds_mod[:, active_indices] if optimize_in_active_subspace else fun.bounds_mod
 
     if method == 'scipy_root':
 
@@ -51,9 +82,10 @@ def optimize_function(fun, optimization_params = {}, writeTrajectory=False, meth
     # --------------------------------------------------------------------------------------------------------
 
     def flux_residual_evaluator(X, y_history=None, x_history=None, metric_history=None):
+        X_full = expand_active_to_full(X)
 
         # Evaluate source term
-        yOut, y1, y2, _ = fun.evaluators["residual_function"](X, outputComponents=True)
+        yOut, y1, y2, _ = fun.evaluators["residual_function"](X_full, outputComponents=True)
 
         # Store values
         if metric_history is not None:
@@ -72,7 +104,8 @@ def optimize_function(fun, optimization_params = {}, writeTrajectory=False, meth
     print("\t- Preparing starting points")
 
     # Guesses coming from the training set
-    xGuesses_train = copy.deepcopy(fun.xGuesses)
+    xGuesses_train_full = copy.deepcopy(fun.xGuesses)
+    xGuesses_train = project_full_to_active(xGuesses_train_full)
 
     # If num_restarts is None, just use the available guesses (no restarts policy)
     if num_restarts is None:
@@ -117,20 +150,24 @@ def optimize_function(fun, optimization_params = {}, writeTrajectory=False, meth
     x_res, y_history, x_history, acq_evaluated = solver_fun(flux_residual_evaluator,xGuesses,solver_options=solver_options,bounds=bounds)
     print("************************************************************************************************")
 
+    x_history = expand_active_history_to_full(x_history)
+
     # --------------------------------------------------------------------------------------------------------
     # Post-process
     # --------------------------------------------------------------------------------------------------------
 
-    bb = TESTtools.checkSolutionIsWithinBounds(x_res, fun.bounds).item()
+    x_res_full = expand_active_to_full(x_res)
+
+    bb = TESTtools.checkSolutionIsWithinBounds(x_res_full, fun.bounds).item()
     if not bb:
         print(f"\t- Is this solution inside bounds? {bb}")
-        print(f"\t\t- with allowed extrapolations? {TESTtools.checkSolutionIsWithinBounds(x_res,fun.bounds_mod).item()}")
+        print(f"\t\t- with allowed extrapolations? {TESTtools.checkSolutionIsWithinBounds(x_res_full,fun.bounds_mod).item()}")
 
     from mitim_tools.opt_tools.OPTtools import summarizeSituation, pointsOperation_bounds, pointsOperation_order
 
     # I apply the bounds correction BEFORE the summary because of possibility of crazy values (problems with GP)
     x_opt, _, _ = pointsOperation_bounds(
-        x_res,
+        x_res_full,
         None,
         None,
         fun,

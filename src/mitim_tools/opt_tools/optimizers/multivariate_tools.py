@@ -391,7 +391,9 @@ def simple_relaxation( flux_residual_evaluator, x_initial, bounds=None, solver_o
     return x_best, y_history, x_history, metric_history
 
 def _sr_step(x, Q, QT, relax, dx_max, dx_max_abs = None, dx_min_abs = None, threshold_zero_flux_issue=1e-10, bounds=None, thr_bounds=1e-4):
-    
+    Q = equal_dimensions(x, Q)
+    QT = equal_dimensions(x, QT)
+
     # Calculate step in gradient (if target > transport, dx>0 because I want to increase gradients)
     dx = relax * (QT - Q) / (Q**2 + QT**2).clamp(min=threshold_zero_flux_issue) ** 0.5
 
@@ -629,11 +631,12 @@ def equal_dimensions(x, y):
     # Root requires that len(x)==len(y)
     # ------------------------------------------------------------
 
-    # If dim_x larger than dim_y, completing now with repeating objectives
-    i = 0
-    while x.shape[-1] > y.shape[-1]:
-        y = torch.cat((y, y[:, i].unsqueeze(1)), axis=1)
-        i += 1
+    # If dim_x is larger than dim_y, the extra design variables do not
+    # have a residual equation associated with them. Pad with zeros so
+    # multivariate solvers leave those coordinates unchanged.
+    if x.shape[-1] > y.shape[-1]:
+        padding = torch.zeros((*y.shape[:-1], x.shape[-1] - y.shape[-1]), device=y.device, dtype=y.dtype)
+        y = torch.cat((y, padding), axis=-1)
 
     # If dim_y larger than dim_x, building the last y as the means
     if x.shape[-1] < y.shape[-1]:

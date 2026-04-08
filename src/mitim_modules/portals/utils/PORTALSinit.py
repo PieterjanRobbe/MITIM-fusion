@@ -279,6 +279,8 @@ def initializeProblem(
     portals_fun.name_transformed_ofs = name_transformed_ofs
     portals_fun.optimization_options["problem_options"]["ofs"] = ofs
     portals_fun.optimization_options["problem_options"]["dvs"] = [*dictDVs]
+    portals_fun.dvs_optimizer = [dv for dv in dictDVs if dv != "fidelity"]
+    portals_fun.dvs_context = [dv for dv in dictDVs if dv == "fidelity"]
     portals_fun.optimization_options["problem_options"]["dvs_min"] = []
     for i in dictDVs:
         portals_fun.optimization_options["problem_options"]["dvs_min"].append(dictDVs[i][0].cpu().numpy())
@@ -446,4 +448,3 @@ def grabPrevious(foldermitim, dictCPs_base):
                 pass
 
     return dictCPs_base
-

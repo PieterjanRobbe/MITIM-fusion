@@ -740,7 +740,7 @@ class PORTALSanalyzer:
             a, b = IOtools.reducePathLevel(self.folder, level=1)
             name0 = f"portals_{b}_ev{0}"  # e.g. portals_jet37_ev0
 
-            tgyroO, powerstateO, _ = runModelEvaluator(
+            powerstateO, _ = runModelEvaluator(
                 self.opt_fun.mitim_model.optimization_object,
                 FolderEvaluation,
                 dictDVs,
@@ -759,8 +759,8 @@ class PORTALSanalyzer:
 
         # Run
         a, b = IOtools.reducePathLevel(self.folder, level=1)
-        name = f"portals_{b}_ev{self.res.best_absolute_index}"  # e.g. portals_jet37_ev0
-        tgyroB, powerstateB, _ = runModelEvaluator(
+        name = f"portals_{b}_ev{self.opt_fun.res.best_absolute_index}"  # e.g. portals_jet37_ev0
+        powerstateB, _ = runModelEvaluator(
             self.opt_fun.mitim_model.optimization_object,
             FolderEvaluation,
             dictDVs,
@@ -771,8 +771,14 @@ class PORTALSanalyzer:
         # Plot
         if fn is not None:
             if not onlyBest:
-                tgyroO.plot(fn=fn, labels=[name0])
-            tgyroB.plot(fn=fn, labels=[name])
+                if powerstateO.model_results is not None:
+                    powerstateO.model_results.plot(fn=fn, labels=[name0])
+                else:
+                    print(f"\t- Skipping original-case transport plot because model_results is not available", typeMsg="w")
+            if powerstateB.model_results is not None:
+                powerstateB.model_results.plot(fn=fn, labels=[name])
+            else:
+                print(f"\t- Skipping best-case transport plot because model_results is not available", typeMsg="w")
 
 
 # ****************************************************************************
