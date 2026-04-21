@@ -215,7 +215,7 @@ class initializer_from_geqdsk(beat_initializer):
     def __call__(
         self,
         geqdsk_file = None,
-        PichT_MW = 1.0,
+        Paux_MW = 1.0,
         Zeff = 1.5,
         netop_20 = 1.0,
         coeffs_MXH = 5,
@@ -227,7 +227,7 @@ class initializer_from_geqdsk(beat_initializer):
         If too fine, TRANSP might complain about kinks and curvature.
         If too coarse, geometry won't be well represented.
         '''
-        
+
         # Read geqdsk
         self.f = GEQtools.MITIMgeqdsk(geqdsk_file)
         
@@ -235,7 +235,16 @@ class initializer_from_geqdsk(beat_initializer):
 
         # Convert to profiles
         print(f'\t- Converting geqdsk to profiles, using {coeffs_MXH = }')
-        p = self.f.to_profiles(ne0_20 = netop_20, Zeff = Zeff, PichT = PichT_MW, coeffs_MXH = coeffs_MXH)
+        
+        type_heating = kwargs_profiles.get('type_heating', 'ICRH')
+        if type_heating == 'ICRH':
+            aux_channels = {'e': 'qrfe(MW/m^3)', 'i': 'qrfi(MW/m^3)', 'total': 'qRF_MW'}
+        elif type_heating == 'NBI':
+            aux_channels = {'e': 'qbeame(MW/m^3)', 'i': 'qbeami(MW/m^3)', 'total': 'qBEAM_MW'}
+        else:
+            aux_channels = None
+        
+        p = self.f.to_profiles(ne0_20 = netop_20, Zeff = Zeff, Paux = Paux_MW, coeffs_MXH = coeffs_MXH, aux_channels = aux_channels)
 
         # Sometimes I may want to change Ip and Bt
         if 'Ip_MA' in kwargs_profiles and kwargs_profiles['Ip_MA'] is not None:
@@ -334,14 +343,14 @@ class initializer_from_separatrix(beat_initializer):
 
     def __call__(
         self,
-        PichT_MW = 1.0,
+        Paux_MW = 1.0,
         Zeff = 1.5,
         netop_20 = 1.0,
         coeffs_MXH = 5,
         extract_995_from="analytic_interpolation",
         **kwargs
         ):
-        
+
         self._minimal_call(extract_995_from=extract_995_from)
         
         if 'rz_boundary_file' in kwargs and kwargs['rz_boundary_file'] is not None:
@@ -374,18 +383,28 @@ class initializer_from_separatrix(beat_initializer):
             )
         
         # Write to profiles
+        
+        type_heating = kwargs.get('type_heating', 'ICRH')
+        if type_heating == 'ICRH':
+            aux_channels = {'e': 'qrfe(MW/m^3)', 'i': 'qrfi(MW/m^3)', 'total': 'qRF_MW'}
+        elif type_heating == 'NBI':
+            aux_channels = {'e': 'qbeame(MW/m^3)', 'i': 'qbeami(MW/m^3)', 'total': 'qBEAM_MW'}
+        else:
+            aux_channels = None
+
         self.p = GEQtools.equilibrium_to_profiles(
             rho, psi, q, pressure, torfluxa, R0, B0, Ip,
             kappa, delta, zeta, rmin, rmaj, z0, sn[:,:coeffs_MXH], cn[:,:coeffs_MXH],
             ne0_20 = netop_20,
             Zeff = Zeff,
             Z = 9,
-            PichT = PichT_MW
+            Paux = Paux_MW,
+            aux_channels = aux_channels,
         )
 
         # [Optional] Use the freegs to correct the profiles (keeping the shaping)
         try:
-            self._correct_profiles_withfreegs(PichT_MW = PichT_MW, Zeff = Zeff, netop_20 = netop_20, coeffs_MXH = coeffs_MXH, **kwargs)
+            self._correct_profiles_withfreegs(Paux_MW = Paux_MW, Zeff = Zeff, netop_20 = netop_20, coeffs_MXH = coeffs_MXH, **kwargs)
         except:
             print('\t- Could not run freegs to correct the profiles, proceeding with uncorrected ones', typeMsg = 'w')
         
@@ -400,7 +419,7 @@ class initializer_from_separatrix(beat_initializer):
         super().__call__(**kwargs)
 
     def _correct_profiles_withfreegs(self,
-            PichT_MW = 1.0, Zeff = 1.5, netop_20 = 1.0, coeffs_MXH = 5,
+            Paux_MW = 1.0, Zeff = 1.5, netop_20 = 1.0, coeffs_MXH = 5,
             Ip_MA = 1.0, a = 0.5, B_T = 5.4, R = 1.5, kappa_sep = 1.7, delta_sep = 0.3, zeta_sep = 0.0, z0 = 0.0, **kwargs):
         '''
         This runs freegs to copy all but the shapings
@@ -421,7 +440,16 @@ class initializer_from_separatrix(beat_initializer):
         # Use old shaping
         
         p_old = copy.deepcopy(self.p)
-        self.p = f.to_profiles(ne0_20 = netop_20, Zeff = Zeff, PichT = PichT_MW, coeffs_MXH = coeffs_MXH)
+        
+        type_heating = kwargs.get('type_heating', 'ICRH')
+        if type_heating == 'ICRH':
+            aux_channels = {'e': 'qrfe(MW/m^3)', 'i': 'qrfi(MW/m^3)', 'total': 'qRF_MW'}
+        elif type_heating == 'NBI':
+            aux_channels = {'e': 'qbeame(MW/m^3)', 'i': 'qbeami(MW/m^3)', 'total': 'qBEAM_MW'}
+        else:
+            aux_channels = None
+        
+        self.p = f.to_profiles(ne0_20 = netop_20, Zeff = Zeff, Paux = Paux_MW, coeffs_MXH = coeffs_MXH, aux_channels = aux_channels)
 
         for i in ['kappa(-)', 'delta(-)', 'zeta(-)', 'rmin(m)', 'rmaj(m)', 'zmag(m)']:
             self.p.profiles[i] = np.interp(self.p.profiles['rho(-)'], p_old.profiles['rho(-)'], p_old.profiles[i])
@@ -966,3 +994,151 @@ class creator_from_eped(creator_from_parameterization):
             eped_results =  np.load(beat_eped_for_save.folder_output / 'eped_results.npy', allow_pickle=True).item()
 
         beat_eped_for_save._inform_save(eped_results)
+
+# --------------------------------------------------------------------------------------------
+# Profile creator from fixed boundary conditions: Create profiles from user-specified BC values
+# --------------------------------------------------------------------------------------------
+
+class creator_from_fixed_bc(creator_from_parameterization):
+
+    def __init__(
+        self,
+        initialize_instance,
+        label = 'fixed_bc',
+        x_bc = None,                # BC location value in the coordinate given by bc_coordinate
+        bc_coordinate = 'rho',      # coordinate for x_bc: 'rho' (rho_tor), 'roa' (r/a), or 'psin'
+        Te_bc = None,               # Te at x_bc (keV)
+        Ti_bc = None,               # Ti at x_bc (keV); if None, uses Te_bc
+        neped_20 = None,            # ne at x_bc (10^20 m^-3)
+        Tesep_keV = None,           # Te at separatrix (keV); if None, read from current profiles
+        nesep_20 = None,            # ne at separatrix (10^20 m^-3); if None, read from current profiles
+        BetaN = None,
+        nu_ne = None,
+        aLn = None,
+        aLT = None,
+        aLTe_to_aLTi_ratio = 1.0,
+        nresol = 501,
+        **kwargs,                   # Absorb extra engineering parameters passed from the namelist
+        ):
+        netop_20 = neped_20
+
+        super().__init__(
+            initialize_instance,
+            label = label,
+            BetaN = BetaN,
+            nu_ne = nu_ne,
+            aLn = aLn,
+            aLT = aLT,
+            aLTe_to_aLTi_ratio = aLTe_to_aLTi_ratio,
+            nresol = nresol,
+            rhotop = x_bc,          # stored as-is; converted to rho_tor in __call__
+            Ttop_keV = Te_bc,
+            netop_20 = netop_20,
+            Tsep_keV = Tesep_keV,
+            nesep_20 = nesep_20,
+            )
+
+        self.x_bc = x_bc
+        self.bc_coordinate = bc_coordinate
+        self.Te_bc = Te_bc
+        self.Ti_bc = Ti_bc if Ti_bc is not None else Te_bc
+
+    def _return_profile_betan_residual(self, aLTi, x_a, aLn, x_top=None):
+
+        x, Te = FunctionalForms.MITIMfunctional_aLyTanh(x_top, self.Te_bc, self.Tsep_keV, aLTi*self.aLTe_to_aLTi_ratio, x_a=x_a, nx=self.nresol)
+        x, Ti = FunctionalForms.MITIMfunctional_aLyTanh(x_top, self.Ti_bc, self.Tsep_keV, aLTi, x_a=x_a, nx=self.nresol)
+        x, ne = FunctionalForms.MITIMfunctional_aLyTanh(x_top, self.netop_20, self.nesep_20, aLn, x_a=x_a, nx=self.nresol)
+
+        self.profiles_insert = {'roa': x, 'Te': Te, 'Ti': Ti, 'ne': ne}
+        creator.__call__(self)
+
+        return ((self.initialize_instance.profiles_current.derived['BetaN_engineering'] - self.BetaN) / self.BetaN) ** 2
+
+    def __call__(self):
+
+        # Convert x_bc from bc_coordinate to rho_tor now that profiles are available
+        _profs = self.initialize_instance.profiles_current
+        _rho   = _profs.profiles['rho(-)']
+        _roa   = _profs.derived['roa']
+        _psin  = _profs.derived['psi_pol_n']
+        if self.bc_coordinate == 'rho':
+            self.rhotop = float(self.x_bc)
+        elif self.bc_coordinate == 'roa':
+            self.rhotop = float(np.interp(self.x_bc, _roa, _rho))
+        elif self.bc_coordinate == 'psin':
+            self.rhotop = float(np.interp(self.x_bc, _psin, _rho))
+        else:
+            raise ValueError(f"bc_coordinate must be 'rho', 'roa', or 'psin', got '{self.bc_coordinate}'")
+
+        print('\n\t--------------------------------')
+        print('\t  fixed_bc profile creator')
+        print('\t--------------------------------')
+        print(f'\t  Boundary condition location:  x_bc    = {self.x_bc} ({self.bc_coordinate})  ->  rho_tor = {self.rhotop:.4f}')
+        print(f'\t  Boundary condition values:    Te_bc   = {self.Te_bc:.4f} keV')
+        print(f'\t                                Ti_bc   = {self.Ti_bc:.4f} keV')
+        print(f'\t                                ne_bc   = {self.netop_20:.4f} 10^20/m^3')
+        print(f'\t  Optimization targets:         BetaN   = {self.BetaN}')
+        print(f'\t                                nu_ne   = {self.nu_ne}')
+        print(f'\t  aLTe/aLTi ratio:              {self.aLTe_to_aLTi_ratio}')
+
+        # Populate separatrix values from current profiles if not provided by user or engineering parameters
+        if self.Tsep_keV is None:
+            self.Tsep_keV = self.initialize_instance.profiles_current.profiles['te(keV)'][-1]
+            print(f'\t  Tsep_keV not provided, read from current profiles: {self.Tsep_keV:.4f} keV')
+        else:
+            print(f'\t  Separatrix values:            Tsep    = {self.Tsep_keV:.4f} keV')
+        if self.nesep_20 is None:
+            self.nesep_20 = self.initialize_instance.profiles_current.profiles['ne(10^19/m^3)'][-1] / 10.0
+            print(f'\t  nesep_20 not provided, read from current profiles: {self.nesep_20:.4f} 10^20/m^3')
+        else:
+            print(f'\t                                nesep   = {self.nesep_20:.4f} 10^20/m^3')
+        print('\t--------------------------------\n')
+
+        # Gradients use r/a coordinate; rhotop is now in rho_tor
+        x_top = np.interp(self.rhotop, self.initialize_instance.profiles_current.profiles['rho(-)'], self.initialize_instance.profiles_current.derived['roa'])
+        print(f'\t- x_bc = {self.x_bc} ({self.bc_coordinate}) -> rho_tor = {self.rhotop:.4f} -> r/a = {x_top:.4f}')
+
+        x_a = 0.3
+
+        # Optimize aLn to match nu_ne (density peaking)
+        if (self.aLn_guess is not None) or (self.nu_ne is None):
+            aLn = self.aLn_guess if self.aLn_guess is not None else 0.2
+            print(f'\n\t- Using fixed aLn = {aLn:.4f} (no nu_ne optimization)')
+        else:
+            aLn_guess = 0.2
+            print(f'\n\t- Optimizing aLn to match nu_ne = {self.nu_ne:.4f}')
+            bounds = [(0.0, 3.0)]
+            res = minimize(self._return_profile_peaking_residual, [aLn_guess], args=(x_a, x_top), method='Nelder-Mead', tol=1e-3, bounds=bounds)
+            aLn = res.x[0]
+            print(f'\t  --> aLn = {aLn:.4f}')
+            print(f'\t  --> ne peaking achieved: {self.initialize_instance.profiles_current.derived["ne_peaking0.2"]:.5f} (target: {self.nu_ne:.5f})')
+
+        # Optimize aLT to match BetaN
+        if (self.aLT_guess is not None) or (self.BetaN is None):
+            aLT = self.aLT_guess if self.aLT_guess is not None else 2.0
+            print(f'\n\t- Using fixed aLT = {aLT:.4f} (no BetaN optimization)')
+        else:
+            aLT_guess = 2.0
+            print(f'\n\t- Optimizing aLTi to match BetaN = {self.BetaN:.4f} (aLTe/aLTi = {self.aLTe_to_aLTi_ratio:.4f})')
+            bounds = [(0.5, 3.0)]
+            res = minimize(self._return_profile_betan_residual, [aLT_guess], args=(x_a, aLn, x_top), method='Nelder-Mead', tol=1e-3, bounds=bounds)
+            aLT = res.x[0]
+            print(f'\t  --> aLTi = {aLT:.4f}, aLTe = {aLT*self.aLTe_to_aLTi_ratio:.4f}')
+            print(f'\t  --> BetaN achieved: {self.initialize_instance.profiles_current.derived["BetaN_engineering"]:.5f} (target: {self.BetaN:.5f})')
+
+        print(f'\n\t- Final gradients: aLn = {aLn:.4f}, aLTi = {aLT:.4f}, aLTe = {aLT*self.aLTe_to_aLTi_ratio:.4f}')
+
+        # Create profiles using the user-specified Te_bc and Ti_bc as separate boundary conditions
+        x, Te = FunctionalForms.MITIMfunctional_aLyTanh(x_top, self.Te_bc, self.Tsep_keV, aLT*self.aLTe_to_aLTi_ratio, x_a=x_a, nx=self.nresol)
+        x, Ti = FunctionalForms.MITIMfunctional_aLyTanh(x_top, self.Ti_bc, self.Tsep_keV, aLT, x_a=x_a, nx=self.nresol)
+        x, ne = FunctionalForms.MITIMfunctional_aLyTanh(x_top, self.netop_20, self.nesep_20, aLn, x_a=x_a, nx=self.nresol)
+
+        self.profiles_insert = {'roa': x, 'Te': Te, 'Ti': Ti, 'ne': ne}
+        creator.__call__(self)
+
+        print(f'\n\t- Profiles inserted. Final derived quantities:')
+        print(f'\t  --> BetaN   = {self.initialize_instance.profiles_current.derived["BetaN_engineering"]:.5f}')
+        print(f'\t  --> nu_ne   = {self.initialize_instance.profiles_current.derived["ne_peaking0.2"]:.5f}')
+        print(f'\t  --> Te0     = {self.initialize_instance.profiles_current.profiles["te(keV)"][0]:.4f} keV')
+        print(f'\t  --> Ti0     = {self.initialize_instance.profiles_current.profiles["ti(keV)"][0,0]:.4f} keV')
+        print(f'\t  --> ne0     = {self.initialize_instance.profiles_current.profiles["ne(10^19/m^3)"][0]/10.0:.4f} 10^20/m^3')

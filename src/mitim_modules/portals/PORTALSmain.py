@@ -22,18 +22,20 @@ from IPython import embed
 
 class portals(STRATEGYtools.opt_evaluator):
     def __init__(
-        self, 
+        self,
         folder,                             # Folder where the PORTALS workflow will be run
-        portals_namelist = None,
-        tensor_options = {
-            "dtype": torch.double,
-            "device": torch.device("cpu"),
-        },
+        portals_namelist=None,
+        tensor_options=None,
         ):
 
-        time1 = datetime.datetime.now()
+        if tensor_options is None:
+            tensor_options = {
+                "dtype": torch.double,
+                "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+            }
+
         print("\n-----------------------------------------------------------------------------------------")
-        print(f"\t\t\t PORTALS class module {time1.strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"\t\t\t PORTALS class module {datetime.datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
         print("-----------------------------------------------------------------------------------------\n")
 
         super().__init__(
@@ -83,6 +85,18 @@ class portals(STRATEGYtools.opt_evaluator):
         define_ranges_from_profiles = self.portals_parameters["solution"]["exploration_ranges"]["define_ranges_from_profiles"]
         start_from_folder = self.portals_parameters["solution"]["exploration_ranges"]["start_from_folder"]
         reevaluate_targets = self.portals_parameters["solution"]["exploration_ranges"]["reevaluate_targets"]
+
+        # Multi-fidelity detection — turbulence_model / neoclassical_model may be a plain
+        # string (single fidelity, as today) or an int-keyed dict (multi-fidelity). When
+        # multi-fidelity, an extra `fidelity_level` design variable gets appended at the
+        # end of the DV vector so the acquisition optimizer can pick a fidelity to evaluate.
+        def _n_fidelities(spec):
+            return len(spec) if isinstance(spec, dict) else 1
+
+        turb_spec = self.portals_parameters["transport"]["evaluator_instance_attributes"]["turbulence_model"]
+        neo_spec = self.portals_parameters["transport"]["evaluator_instance_attributes"]["neoclassical_model"]
+        n_fidelities = max(_n_fidelities(turb_spec), _n_fidelities(neo_spec))
+        add_fidelity_level_variable = n_fidelities > 1
 
         # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
         # Make sure that options that are required by good behavior of PORTALS
@@ -135,6 +149,8 @@ class portals(STRATEGYtools.opt_evaluator):
             tensor_options = self.tensor_options,
             seedInitial=seedInitial,
             checkForSpecies=askQuestions,
+            add_fidelity_level_variable=add_fidelity_level_variable,
+            n_fidelities=n_fidelities,
         )
         print(">> PORTALS initalization module (END)", typeMsg="i")
 
@@ -242,13 +258,12 @@ class portals(STRATEGYtools.opt_evaluator):
 			Note: var_dict['Qe_tr_turb'] must have shape (dim1...N, num_radii)
 		"""
 
-        var_dict = {}
+        var_dict_parts = {}
         for of in ofs_ordered_names:
-
             var = '_'.join(of.split("_")[:-1])
-            if var not in var_dict:
-                var_dict[var] = torch.Tensor().to(Y)
-            var_dict[var] = torch.cat((var_dict[var], Y[..., ofs_ordered_names == of]), dim=-1)
+            var_dict_parts.setdefault(var, []).append(Y[..., ofs_ordered_names == of])
+
+        var_dict = {var: torch.cat(parts, dim=-1).to(Y) for var, parts in var_dict_parts.items()}
 
         """
 		-------------------------------------------------------------------------
@@ -421,6 +436,14 @@ def runModelEvaluator(
 
     # In certain cases, I want to cold_start the model directly from the PORTALS call instead of powerstate
     powerstate.transport_options["cold_start"] = cold_start
+
+    # Multi-fidelity: if the optimizer chose a fidelity_level DV, round it to int and route
+    # it into the transport instance via the existing evaluator_instance_attributes setattr
+    # pipeline (STATEtools.calculateTransport applies these attributes to the transport
+    # instance before calling .evaluate()).
+    if "fidelity_level" in dictDVs:
+        fidelity_level = int(round(float(dictDVs["fidelity_level"]["value"])))
+        powerstate.transport_options["evaluator_instance_attributes"]["fidelity_level"] = fidelity_level
 
     # Evaluate X (DVs) through powerstate.calculate(). This will populate .plasma with the results
     powerstate.calculate(X, nameRun=name, folder=folder_model, evaluation_number=numPORTALS, transport_model_fidelity=fidelity)

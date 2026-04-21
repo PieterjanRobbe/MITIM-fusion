@@ -3,6 +3,7 @@ import copy
 import datetime
 import array
 import traceback
+from sympy import EX
 import torch
 from pathlib import Path
 from collections import OrderedDict
@@ -12,7 +13,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 from mitim_tools.misc_tools import IOtools, GRAPHICStools, GUItools, LOGtools
 from mitim_tools.misc_tools.IOtools import mitim_timer
-from mitim_tools.opt_tools import OPTtools, STEPtools
+from mitim_tools.opt_tools import OPTtools, STEPtools, BOTORCHtools
 from mitim_tools.opt_tools.utils import (
     BOgraphics,
     SBOcorrections,
@@ -71,14 +72,17 @@ class opt_evaluator:
         folder,
         namelist=None,
         default_namelist_function=None,
-        tensor_options = {
-            "dtype": torch.double,
-            "device": torch.device("cpu"),
-        }
+        tensor_options=None,
     ):
         """
         Namelist file can be provided and will be copied to the folder
         """
+
+        if tensor_options is None:
+            tensor_options = {
+                "dtype": torch.double,
+                "device": torch.device("cuda" if torch.cuda.is_available() else "cpu"),
+            }
 
         self.tensor_options = tensor_options
 
@@ -281,7 +285,7 @@ class opt_evaluator:
         if plotYN and (analysis_level >= 0):
             if "fn" not in self.__dict__:
                 self.fn = GUItools.FigureNotebook("MITIM Optimization Results", show=not noshow)
-            
+
         self.read_optimization_results(
             plotFN=self.fn if (plotYN and (analysis_level >= 0)) else None,
             folderRemote=folderRemote,
@@ -289,6 +293,13 @@ class opt_evaluator:
             pointsEvaluateEachGPdimension=pointsEvaluateEachGPdimension,
             rangePlot=rangesPlot,
         )
+
+        # Record the tab count before analyze_results runs so we can move
+        # the module-specific tabs that it adds to the FRONT of the
+        # notebook afterwards. Plotting order stays generic-first so the
+        # surrogate sensitivity plot doesn't trip over cached
+        # parameters_combined left behind by PORTALS plotExpected.
+        _n_tabs_before_analyze = self.fn.tabs.count() if (plotYN and (analysis_level >= 0) and not getattr(self.fn, "_headless", False)) else 0
 
         self_complete = None
         if analysis_level > 1:
@@ -321,6 +332,16 @@ class opt_evaluator:
                     print('\t- No "analyze_results" method found for this function class',typeMsg="w")
 
         if plotYN and (analysis_level >= 0):
+            # Move the module-specific block to the front so the notebook
+            # opens with e.g. PORTALS tabs on the left and the generic
+            # OPT tabs on the right, while the underlying plot order
+            # stays generic-first (which avoids the cached-powerstate
+            # shape mismatch in input_transform_portals).
+            if not getattr(self.fn, "_headless", False):
+                _n_portals = self.fn.tabs.count() - _n_tabs_before_analyze
+                if _n_portals > 0:
+                    self.fn.move_tabs_block_to_front(_n_tabs_before_analyze, _n_portals)
+
             print(f"\n- Plotting took {IOtools.getTimeDifference(time1)}")
 
             if save_folder is not None:
@@ -340,6 +361,7 @@ class MITIM_BO:
         seed=0,
         askQuestions=True,
         ENABLE_EMBED=False, # If True, will enable IPython embed, useful for debugging (but won't write .log files)
+        write_log_file=True, # If False, skip the stdout->optimization_log.txt redirection (prints flow straight to whatever fd was captured, e.g. sbatch --output for slurm runs). Useful on clusters with slow IO where buffering the in-folder log hides progress from the slurm stdout.
     ):
         """
         Inputs:
@@ -441,16 +463,31 @@ class MITIM_BO:
    
             self.timings_file = self.folderOutputs / "timing.jsonl"
 
-            # Logger            
-            if not ENABLE_EMBED:
+            # Logger
+            if not ENABLE_EMBED and write_log_file:
                 sys.stdout = LOGtools.Logger(logFile=self.folderOutputs / "optimization_log.txt", writeAlsoTerminal=True)
+            elif not write_log_file:
+                # Without the Logger, prints flow straight to whatever fd was
+                # captured by the shell. Under slurm that fd is a FILE
+                # (sbatch --output), which Python defaults to *full* buffering
+                # on — so without reconfiguring you'd see nothing in
+                # slurm_output.dat until the buffer filled or the process
+                # exited. Flip stdout/stderr to line-buffered so every '\n'
+                # triggers a flush.
+                for _stream in (sys.stdout, sys.stderr):
+                    try:
+                        _stream.reconfigure(line_buffering=True)
+                    except Exception:
+                        pass
+                print("- Skipping optimization_log.txt (write_log_file=False); stdout/stderr reconfigured to line-buffered so the captured stdout (e.g. slurm_output.dat) flushes on every newline")
                 
             print("\n-----------------------------------------------------------------------------------------")
             print("\t\t\t BO class module")
             print("-----------------------------------------------------------------------------------------\n")
 
-            # Print machine resources
+            # Print machine resources and apply GP performance settings (once per run)
             IOtools.print_machine_info()
+            BOTORCHtools.configure_performance_settings()
 
             # Meta
             self.numIterations = self.optimization_options["convergence_options"]["maximum_iterations"]
@@ -716,7 +753,7 @@ class MITIM_BO:
                     current_step.x_next = self.x_next
 
                 # If there is any Nan, assume that I cannot cold_start this step
-                if IOtools.isAnyNan(self.x_next.cpu()):
+                if self.x_next.isnan().any():
                     print("\t* Because x_next points have NaNs, disabling cold_starting-from-previous from this point on",typeMsg="w")
                     self.cold_start = True
 
@@ -764,7 +801,13 @@ class MITIM_BO:
         self.optimization_object.finalize_evaluation()
 
         print(f"- Complete MITIM workflow took {IOtools.getTimeDifference(timeBeginning)} ~~")
-        print("********************************************************\n")
+        print("\n **********************************************************************************************************************")
+        print(  "******************************************  *****   *   *   ****    **************************************************")
+        print(  "******************************************  *       **  *   *   *   **************************************************")
+        print(  "******************************************  ****    * * *   *   *   **************************************************")
+        print(  "******************************************  *       *  **   *   *   **************************************************")
+        print(  "******************************************  *****   *   *   ****    **************************************************")
+        print(  "**********************************************************************************************************************\n")
 
     def prepare_for_save_MITIMBO(self, copyClass):
         """
@@ -821,9 +864,21 @@ class MITIM_BO:
         for ikey in self.optimization_object.doNotSaveVariables:
             saver[ikey] = self.optimization_object.__dict__[ikey]
             del self.optimization_object.__dict__[ikey]
+
+        # Temporarily remove evaluators from steps: they contain acquisition functions with
+        # non-leaf tensors that cannot be deep-copied (prepare_for_save_MITIMBO already deletes
+        # them from the saved copy anyway)
+        saved_evaluators = {}
+        for i, step in enumerate(self.steps):
+            if "evaluators" in step.__dict__:
+                saved_evaluators[i] = step.__dict__.pop("evaluators")
         # -----------------------------------------------------------------------------------
 
-        copyClass = self.prepare_for_save_MITIMBO(copy.deepcopy(self))
+        try:
+            copyClass = self.prepare_for_save_MITIMBO(copy.deepcopy(self))
+        finally:
+            for i, ev in saved_evaluators.items():
+                self.steps[i].evaluators = ev
 
         with open(stateFile_tmp, "wb") as handle:
             try:
@@ -946,8 +1001,8 @@ class MITIM_BO:
         # ~~~~~~~~~~~~~~~~~~
         # What's the expected value of the next points?
         # ~~~~~~~~~~~~~~~~~~
-
-        y, u, l, _ = self.steps[-1].GP["combined_model"].predict(self.x_next)
+        with torch.no_grad():
+            y, u, l, _ = self.steps[-1].GP["combined_model"].predict(self.x_next)
         self.y_next_pred = y.detach()
         self.y_next_pred_u = u.detach()
         self.y_next_pred_l = l.detach()
@@ -957,11 +1012,11 @@ class MITIM_BO:
         # ~~~~~~~~~~~~~~~~~~
 
         # Update the train_X
-        self.train_X = np.append(self.train_X, self.x_next.cpu(), axis=0)
+        self.train_X = np.vstack([self.train_X, self.x_next.detach().cpu().numpy()])
 
         # Update optimization_data with nans for the new points (will be updated later)
-        _,_,objective = self.optimization_object.scalarized_objective(torch.from_numpy(self.train_Y))
-        self.optimization_data.update_points(self.train_X, Y=self.train_Y, Ystd=self.train_Ystd, objective=objective.cpu().numpy())
+        _,_,objective = self.optimization_object.scalarized_objective(torch.from_numpy(self.train_Y).to(self.dfT))
+        self.optimization_data.update_points(self.train_X, Y=self.train_Y, Ystd=self.train_Ystd, objective=objective.detach().cpu().numpy())
 
         # Update optimization_results only as "predicted"
         if not isThisCorrected:
@@ -989,8 +1044,8 @@ class MITIM_BO:
         # ------------------
 
         # Update the train_Y
-        self.train_Y = np.append(self.train_Y, y_next, axis=0)
-        self.train_Ystd = np.append(self.train_Ystd, ystd_next, axis=0)
+        self.train_Y = np.vstack([self.train_Y, y_next])
+        self.train_Ystd = np.vstack([self.train_Ystd, ystd_next])
 
         # --- If problem in evaluation don't use this point -------------------------------------------------------------------
         for i in range(self.train_Y.shape[0]):
@@ -1163,10 +1218,12 @@ class MITIM_BO:
                 # It could be the case that those points in Tabular are outside the bounds that I want to apply to this optimization, remove outside points?
                 
                 if self.optimization_options["initialization_options"]["ensure_within_bounds"]:
+                    bounds_tensor = torch.from_numpy(np.array(list(self.bounds.values())).T).to(self.dfT)
+                    train_X_tensor = torch.from_numpy(self.train_X).to(self.dfT)
                     for i in range(self.train_X.shape[0]):
                         insideBounds = TESTtools.checkSolutionIsWithinBounds(
-                            torch.from_numpy(self.train_X[i, :]).to(self.dfT),
-                            torch.from_numpy(np.array(list(self.bounds.values())).T),
+                            train_X_tensor[i],
+                            bounds_tensor,
                         )
                         if not insideBounds.item():
                             self.avoidPoints_outside.append(i)
@@ -1260,8 +1317,8 @@ class MITIM_BO:
         # -----------------------------------------------------------------
 
         # Write initialization in Tabular
-        _,_,objective = self.optimization_object.scalarized_objective(torch.from_numpy(self.train_Y))
-        self.optimization_data.update_points(self.train_X, Y=self.train_Y, Ystd=self.train_Ystd, objective=objective.cpu().numpy())
+        _,_,objective = self.optimization_object.scalarized_objective(torch.from_numpy(self.train_Y).to(self.dfT))
+        self.optimization_data.update_points(self.train_X, Y=self.train_Y, Ystd=self.train_Ystd, objective=objective.detach().cpu().numpy())
 
         # Write optimization_results
         self.optimization_results.addPoints(
@@ -1551,8 +1608,8 @@ class MITIM_BO:
 		"""
         try:    
             self.plotAcquisitionOptimizationSummary(fn=fn)
-        except: 
-            print('\t- Problem plotting acquisition optimization summary', typeMsg='w')
+        except Exception as e:
+            print(f'\t- Problem plotting acquisition optimization summary: {e}', typeMsg='w')
 
         return fn
 
@@ -1613,7 +1670,11 @@ class MITIM_BO:
                 
                 # Plot max of guesses
                 if len(y_acq)>0:
-                    ax.axhline(y=np.max(y_acq), c=colors[i], ls='--', lw=1.0, label=f'{infoOPT[i]["method"]} (max of guesses)')
+                    if y_acq.ndim > 1:
+                        y_acq_max = y_acq.max(axis=1)
+                    else:
+                        y_acq_max = y_acq
+                    ax.axhline(y=y_acq_max[0], c=colors[i], ls='--', lw=1.0, label=f'{infoOPT[i]["method"]} (max of guesses)')
 
             ax.set_title(f'BO Step #{step} [{acquisition_metadata.get("acquisition_kind", "acq")}]')
             ax.set_ylabel('$f_{acq}$ (to max)')
@@ -1636,8 +1697,9 @@ class MITIM_BO:
         maxPoints = 1  # 4
         xExplore = []
         if "x_next" in step.__dict__.keys() and step.x_next is not None:
+            x_next_np = step.x_next.detach().cpu().numpy()
             for i in range(np.min([step.x_next.shape[0], maxPoints])):
-                xExplore.append(step.x_next[i].cpu().numpy())
+                xExplore.append(x_next_np[i])
         else:
             xExplore.append(step.train_X[0])
 

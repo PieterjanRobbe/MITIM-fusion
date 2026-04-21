@@ -28,6 +28,7 @@ from mitim_tools.gs_tools import GEQtools
 from mitim_tools.gs_tools.utils import GEQplotting
 from mitim_tools.misc_tools.GUItools import FigureNotebook
 from mitim_tools.misc_tools.LOGtools import printMsg as print
+from mitim_tools.misc_tools.style_tools import apply_theme, get_colors
 from IPython import embed
 
 def read_cdf_transp(cdf_file):
@@ -116,7 +117,8 @@ class transp_output:
 
         self.readGEQDSK = readGEQDSK
 
-        self.mainLegendSize = 8
+
+        apply_theme("default")
 
         np.seterr(under="ignore")
 
@@ -2871,59 +2873,97 @@ class transp_output:
             self.Pnbih = self.f["PBTH"][:]  # MW/m^3
 
             # Per beam
+            
+            # How many beams?
+            self.nbeams = 0
+            for i in range(100):
+                num_padded_zero = f"0{i + 1}" if i < 9 else f"{i + 1}"
+                try:                    
+                    _ = self.f[f"PINJ{num_padded_zero}"][:]
+                    self.nbeams += 1
+                except:
+                    break
+            
 
             PnbiT_beam = []
-            for i in range(8):
+            for i in range(self.nbeams):
+                num_padded_zero = f"0{i + 1}" if i < 9 else f"{i + 1}"
                 try:
-                    PnbiT_beam.append(self.f[f"PINJ0{i + 1}"][:] * 1e-6)
+                    PnbiT_beam.append(self.f[f"PINJ{num_padded_zero}"][:] * 1e-6)
                 except:
                     break
             self.PnbiT_beam = np.array(PnbiT_beam)
 
             Pnbie_beam = []
-            for i in range(8):
+            for i in range(self.nbeams):
+                num_padded_zero = f"0{i + 1}" if i < 9 else f"{i + 1}"
                 try:
-                    Pnbie_beam.append(self.f[f"PBE0{i + 1}_TOT"][:])
+                    Pnbie_beam.append(self.f[f"PBE{num_padded_zero}_TOT"][:])
                 except:
                     break
             self.Pnbie_beam = np.array(Pnbie_beam)
 
             Pnbii_beam = []
-            for i in range(8):
+            for i in range(self.nbeams):
+                num_padded_zero = f"0{i + 1}" if i < 9 else f"{i + 1}"
                 try:
-                    Pnbii_beam.append(self.f[f"PBI0{i + 1}_TOT"][:])
+                    Pnbii_beam.append(self.f[f"PBI{num_padded_zero}_TOT"][:])
                 except:
                     break
             self.Pnbii_beam = np.array(Pnbii_beam)
 
             Pnbih_beam = []
-            for i in range(8):
+            for i in range(self.nbeams):
+                num_padded_zero = f"0{i + 1}" if i < 9 else f"{i + 1}"
                 try:
-                    Pnbih_beam.append(self.f[f"PBTH0{i + 1}_TOT"][:])
+                    Pnbih_beam.append(self.f[f"PBTH{num_padded_zero}_TOT"][:])
                 except:
                     break
             self.Pnbih_beam = np.array(Pnbih_beam)
 
             # particles
             Pnbip_beam = []
-            for i in range(8):
+            for i in range(self.nbeams):
+                num_padded_zero = f"0{i + 1}" if i < 9 else f"{i + 1}"
                 try:
                     Pnbip_beam.append(
-                        self.f[f"BDEP0{i + 1}_TOT"][:] * 1e6 * 1e-20
+                        self.f[f"BDEP{num_padded_zero}_TOT"][:] * 1e6 * 1e-20
                     )  # 1E20/m^3/s
                 except:
                     break
             self.Pnbip_beam = np.array(Pnbip_beam)
 
+            # Current
             j_beam, j_beamU = [], []
-            for i in range(8):
+            for i in range(self.nbeams):
+                num_padded_zero = f"0{i + 1}" if i < 9 else f"{i + 1}"
                 try:
-                    j_beam.append(self.f[f"BDC0{i + 1}"][:] * 1e-6 * 1e4)
-                    j_beamU.append(self.f[f"UDC0{i + 1}"][:] * 1e-6 * 1e4)
+                    j_beam.append(self.f[f"BDC{num_padded_zero}"][:] * 1e-6 * 1e4)
+                    j_beamU.append(self.f[f"UDC{num_padded_zero}"][:] * 1e-6 * 1e4)
                 except:
                     break
             self.jNBI_beam = np.array(j_beam)
             self.jNBI_beamU = np.array(j_beamU)
+
+            # torque
+            Pnbit_beam = []
+            for i in range(self.nbeams):
+                num_padded_zero = f"0{i + 1}" if i < 9 else f"{i + 1}"
+                try:
+                    Pnbit_beam.append(
+                        self.f[f"TQTOT{num_padded_zero}"][:] * 1e6
+                    )  # N*m/m^3
+                except:
+                    break
+            self.Pnbit_beam = np.array(Pnbit_beam)
+            
+            self.Pnbit_e     = self.f["TQBE"][:] * 1e6   # torque to electrons (N·m/m³)
+            self.Pnbit_i     = self.f["TQBI"][:] * 1e6   # torque to ions (N·m/m³)
+            self.Pnbit_coll  = self.f["TQBCO"][:] * 1e6  # total collisional torque (N·m/m³)
+            self.Pnbit_jxb   = self.f["TQJXB"][:] * 1e6  # total JxB torque (N·m/m³)
+            self.Pnbit_therm = self.f["TQBTH"][:] * 1e6  # total thermalization torque (N·m/m³)
+            
+            self.Pnbit_total = self.Pnbit_coll+self.Pnbit_jxb+self.Pnbit_therm #self.f["TQIN"][:] * 1e6 # TQIN is unreliable (often zero)
 
         except:
             self.PnbiINJ = copy.deepcopy(self.PohT) * 0.0 + self.eps00
@@ -2948,6 +2988,14 @@ class transp_output:
             self.Pnbie_beam = copy.deepcopy(self.Poh) * 0.0 + self.eps00
             self.Pnbii_beam = copy.deepcopy(self.Poh) * 0.0 + self.eps00
             self.Pnbih_beam = copy.deepcopy(self.Poh) * 0.0 + self.eps00
+            
+            self.Pnbit_e     = copy.deepcopy(self.Poh) * 0.0 + self.eps00
+            self.Pnbit_i     = copy.deepcopy(self.Poh) * 0.0 + self.eps00
+            self.Pnbit_coll  = copy.deepcopy(self.Poh) * 0.0 + self.eps00
+            self.Pnbit_jxb   = copy.deepcopy(self.Poh) * 0.0 + self.eps00
+            self.Pnbit_therm = copy.deepcopy(self.Poh) * 0.0 + self.eps00
+            
+            self.Pnbit_total = copy.deepcopy(self.Poh) * 0.0 + self.eps00
 
             # Info about sources of particles
             self.nD_source_beams = copy.deepcopy(self.Poh) * 0.0 + self.eps00
@@ -4546,15 +4594,12 @@ class transp_output:
         indTime = self.plotConvSolver_x(
             timeReq, avt=0.0, ax=ax0, alsoParticle=False, alsoTR=True, colorStart=0
         )
-        GRAPHICStools.addDenseAxis(ax0)
         indX = self.plotConvSolver_t(
             rads[0], ax=ax1, meanLim=True, leg=False, alsoParticle=False
         )
-        GRAPHICStools.addDenseAxis(ax1)
         indX2 = self.plotConvSolver_t(
             rads[1], ax=ax2, meanLim=True, leg=False, alsoParticle=False
         )
-        GRAPHICStools.addDenseAxis(ax2)
         ax0.axvline(x=self.x_lw[indX], c="k", ls="--")
         ax0.axvline(x=self.x_lw[indX2], c="k", ls="--")
         ax1.axvline(x=self.t[indTime], c="k", ls="--")
@@ -4960,7 +5005,7 @@ class transp_output:
             plotVV=True,
             Aspect=True,
         )
-        #axGeo.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        #axGeo.legend(loc="upper right")
 
         axParams = fig.add_subplot(grid[0:3, 1])  # fig.add_subplot(6,3,())
         axGeoParams = fig.add_subplot(grid[3:, 1])  # ,sharex=axParams) #fig.add_subplot(6,3,())
@@ -4975,7 +5020,6 @@ class transp_output:
         ax1.tick_params(labelbottom=True)
         ax1.set_xlabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax1)
 
         # ----
         ax1.plot(self.t, self.Vsurf, lw=2, label="$V_{surf}$ (V)")
@@ -4985,10 +5029,9 @@ class transp_output:
         ax1.plot(self.t, self.fGv, lw=2, label="$f_{G,vol}$")
         ax1.plot(self.t, self.fGl, lw=2, label="$f_{G,lin}$")
 
-        ax1.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax1.legend(loc="best")
         ax1.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax1)
 
         # ----
         ax2 = fig.add_subplot(grid[3:, 2])
@@ -5014,14 +5057,13 @@ class transp_output:
             label="$\\langle B_{\\theta}\\rangle_L=\\mu_0 I_{p,encl}/L_{\\theta}$ ",
         )
 
-        ax2.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax2.legend(loc="best")
         ax2.set_ylim(bottom=0)
 
         ax2.set_ylabel("Magnetic fields (T)")
         ax2.set_xlabel("$\\rho_N$")
         ax2.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax2)
 
     def plotOperation(self, ax=None, ax1=None):
         if ax is None:
@@ -5036,11 +5078,10 @@ class transp_output:
         ax.plot(self.t, self.ne_l, lw=2, label="$n_e$ lin ($10^{20}m^{-3}$)")
         ax.plot(self.t, self.Zeff_avol, lw=2, label="$Z_{eff}$")
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1.plot(self.t, self.Rmajor, lw=2, label="$R_{major}$ (m)")
         ax1.plot(self.t, self.a, lw=2, label="$a$ (m)")
@@ -5049,11 +5090,10 @@ class transp_output:
         ax1.plot(self.t, self.q95, lw=2, label="$q_{95}$")
         ax1.plot(self.t, self.q95_check, lw=1, c="y", label="$q_{95,check}$")
 
-        ax1.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax1.legend(loc="best")
         ax1.set_ylim(bottom=0)
         ax1.set_xlabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax1)
 
     def plotPressures(self, fig=None, time=None):
         if fig is None:
@@ -5097,11 +5137,10 @@ class transp_output:
 
         ax1.axvline(x=self.t[it], c="m", lw=1.0, ls="--")
 
-        ax1.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax1.legend(loc="best")
         ax1.set_ylim(bottom=0)
         ax1.set_xlabel("Time (s)")
         ax1.set_ylabel("W (MJ)")
-        GRAPHICStools.addDenseAxis(ax1)
 
         ax2.plot(self.t, self.BetaN, lw=2, label="$\\beta_N$ (%)")
         ax2.plot(self.t, self.BetaTor * 100, lw=2, label="$\\beta_{\\phi}$ (%)")
@@ -5126,12 +5165,11 @@ class transp_output:
         )
         # ax2.plot(self.t,self.Beta*100,lw=2,c='c',ls='--',label='$\\beta$ (%)')
 
-        ax2.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax2.legend(loc="best")
         ax2.set_ylabel("$\\beta_N$ (%), $\\beta_{\\phi}$ (%), $\\beta_{\\theta}$")
         ax2.set_xlabel("Time (s)")
         # ax2.set_ylim([0,3.0])
         ax2.axvline(x=self.t[it], c="m", lw=1.0, ls="--")
-        GRAPHICStools.addDenseAxis(ax2)
 
         ax3.plot(self.x_lw, self.p_kin[it], lw=2, label="$p_{kin}$")
         ax3.plot(self.x_lw, self.p[it], lw=2, label="$p$")
@@ -5156,12 +5194,11 @@ class transp_output:
             label="$p+p_{fast}$ check",
         )
 
-        ax3.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax3.legend(loc="best")
         ax3.set_ylim(bottom=0)
         ax3.set_xlim([0, 1])
         ax3.set_xlabel("$\\rho_N$")
         ax3.set_ylabel("p (MPa)")
-        GRAPHICStools.addDenseAxis(ax3)
 
         ax4.plot(self.x_lw, self.BetaTor_x[it], lw=2, label="$\\beta_{\\phi}$")
         ax4.plot(
@@ -5172,12 +5209,11 @@ class transp_output:
             label="$\\beta_{\\phi}$ check",
         )
 
-        ax4.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax4.legend(loc="best")
         ax4.set_ylim(bottom=0)
         ax4.set_xlim([0, 1])
         ax4.set_xlabel("$\\rho_N$")
         ax4.set_ylabel("$\\beta$")
-        GRAPHICStools.addDenseAxis(ax4)
 
     def plotGeometry(
         self,
@@ -5389,7 +5425,7 @@ class transp_output:
 
         ax.set_ylabel("B (T)")
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
     def plotLH(self, fig=None, time=None, plotTrajectory=True):
         if fig is None:
@@ -5446,7 +5482,6 @@ class transp_output:
 
         ax.set_xlabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Only Qi
         ax = fig.add_subplot(grid[1, 0], sharex=ax)
@@ -5470,7 +5505,6 @@ class transp_output:
         )
         ax.legend(loc="lower right")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Only Qi
         ax1 = fig.add_subplot(grid[0, 1])
@@ -5480,8 +5514,6 @@ class transp_output:
         # Plot u-shape
         self.plotDensityLH(axs=axs, time=time, plotTrajectory=plotTrajectory)
 
-        GRAPHICStools.addDenseAxis(ax1)
-        GRAPHICStools.addDenseAxis(ax2)
 
     def plotDensityLH(self, axs=None, time=None, plotTrajectory=True):
         if axs is None:
@@ -5649,7 +5681,6 @@ class transp_output:
             )
         ax4.set_xlabel("Time (s)")
         ax4.set_ylabel("Density ($10^{20} m^{-3}$)")
-        GRAPHICStools.addDenseAxis(ax4)
         ax4.set_title("Extraction of FBM")
         GRAPHICStools.addLegendApart(ax4, ratio=0.8)
         ax4.axvspan(
@@ -5906,13 +5937,12 @@ class transp_output:
         ax.plot(self.ddt_t, self.dpdt, lw=2, label="max($\\Delta p$)")
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Percent Variation (%)")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
         ax.set_title("Sawtooth-smoothed variation")
         ax.set_ylim([0, 20])
 
         ax.axhline(y=5.0, ls="--", lw=2, c="k")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax2
         rhos = [0.2, 0.4, 0.6, 0.8, 1.0]
@@ -5946,9 +5976,8 @@ class transp_output:
         ax.set_xlabel("Time(s)")
         ax.set_ylabel("Normalized to original values")
         ax.set_title("Quantities at 0,0.2,0.4,0.6,0.8,1.0")
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # times
         ax = ax3
@@ -5970,12 +5999,11 @@ class transp_output:
         )
         # ax7.plot(self.tau_saw_t,self.tau_q95*1E-3*1E-3,lw=3,label='$\\tau_{q95}$ (/1000)',marker='o')
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Time (s)")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # tq profiles
         ax = ax4
@@ -5999,13 +6027,12 @@ class transp_output:
         )
 
         ax.axhline(y=1.0, c="k", ls="--", lw=1)
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylim(bottom=0)
         ax.set_xlim([0, 1])
         ax.set_ylabel("q-profile")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # _
         ax = ax5
@@ -6017,13 +6044,12 @@ class transp_output:
             label="$\\tau_{SD,He4}$ Stix",
         )
 
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylim(bottom=0)
         ax.set_xlim([0, 1])
         ax.set_ylabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax6
         rhos = [0.2, 0.4, 0.6, 0.8, 0.95]
@@ -6032,10 +6058,9 @@ class transp_output:
             ax.plot(self.t, self.q[:, ix], lw=1, label=f"$\\rho_N={i:.2f}$")
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("q")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.axhline(y=1.0, c="k", ls="--", lw=1)
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
 
     def plotElectricField(self, fig=None, time=None):
@@ -6063,9 +6088,8 @@ class transp_output:
         ax.plot(self.xb_lw, self.Epot_nc[it, :], lw=2, c="g", label="V_{r,nc}")
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("Electric potential $\\Phi$ (kV)")
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax.set_xlim([0, 1])
 
@@ -6091,22 +6115,20 @@ class transp_output:
         )
         ax.set_xlabel("R (m)")
         ax.set_ylabel("$E_r$ (kV/m)")
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
         ax.set_title("Neoclassical Er")
 
         ax.axvline(x=self.Rmajor[it], ls="--", lw=2, c="k")
         ax.axvline(x=self.Rmag[it], ls="--", lw=2, c="g")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Er
         ax = ax2  #
         ax.plot(self.x_lw, self.Er_LF[it, :] * 1e-3, lw=2, c="r", label="$E_r$, LF")
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$E_r$ (kV/m)")
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax3  # .twinx()
         ax.plot(self.x_lw, self.GammaExB[it, :], lw=2, c="m", label="$\\gamma_{ExB}$")
@@ -6114,7 +6136,6 @@ class transp_output:
         ax.legend(loc="upper center")
         ax.set_xlabel("$\\rho_N$")
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotEM(self, fig=None, time=None):
         if time is None:
@@ -6160,14 +6181,13 @@ class transp_output:
 
         ax.axhline(y=1.0, ls="--", c="k", lw=1)
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("q")
         ax.set_ylim(bottom=0)
         ax.set_xlim([0, 1])
         # ax.set_title('SOLID {0:.3f}s, DASHED {1:.3f}s'.format(self.t[i1],self.t[i2]))
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # J profile radial
         ax = ax3
@@ -6212,14 +6232,13 @@ class transp_output:
             label="sum",
         )
 
-        ax.legend(loc="best", fontsize=7)
+        ax.legend(loc="best")
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("J ($MA/m^2$)")
         ax.set_title("XS-Average Currents")
 
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Loop voltage
         ax = ax2  #
@@ -6253,11 +6272,10 @@ class transp_output:
         )
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$V$ (V)")
-        ax.legend(loc="best", fontsize=7)
+        ax.legend(loc="best")
         ax.set_ylim([0, np.max(self.V[it - 1]) * 1.5])
         ax.set_title("Loop Voltage Profile")
 
-        GRAPHICStools.addDenseAxis(ax)
         ax.set_xlim([0, 1])
 
         ax = ax4
@@ -6271,13 +6289,12 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$E$ (V/m)")
         # ax.legend(loc='lower right')
-        ax.legend(loc="best", fontsize=7)
+        ax.legend(loc="best")
         ax.set_title("Toroidal electric field")
         ax.set_ylim([self.Etor[it].min() - 0.1, self.Etor[it].max() + 0.1])
 
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Ohmic Power
         ax = ax6  #
@@ -6321,11 +6338,10 @@ class transp_output:
         )
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("Power ($MW/m^3$)")
-        ax.legend(loc="best", fontsize=7)
+        ax.legend(loc="best")
         ax.set_title("Ohmic power")
         ax.set_ylim([0, np.max(self.Poh[it]) * 1.2])
 
-        GRAPHICStools.addDenseAxis(ax)
         ax.set_xlim([0, 1])
 
         # -------------------------------------------
@@ -6350,13 +6366,12 @@ class transp_output:
 
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$\\eta$ (Ohm*m)")
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
         ax.set_title("Resistivity")
 
         # ax.set_ylim([0,self.eta_avol[it]*2.0])
         ax.set_yscale("log")
 
-        GRAPHICStools.addDenseAxis(ax)
         ax.set_xlim([0, 1])
 
         #
@@ -6378,13 +6393,12 @@ class transp_output:
             label="$U_{B_{\\theta}}$ check",
         )
 
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("U ($MJ/m^3$)")
         ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         #
         ax = ax8
@@ -6430,14 +6444,13 @@ class transp_output:
                 label="$\\langle J\\cdot B\\rangle_{IS, Anom}$",
             )
 
-        ax.legend(loc="best", fontsize=8)
+        ax.legend(loc="best")
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$\\langle J\\cdot B\\rangle$ ($MA\\cdot T/m^2$)")
         ax.set_xlim([0, 1])
 
         ax.axhline(y=0.0, ls="--", c="k", lw=0.5)
 
-        GRAPHICStools.addDenseAxis(ax)
         ax.set_xlim([0, 1])
 
     def plotTimeAverages(self, fig=None, times=None):
@@ -6478,7 +6491,7 @@ class transp_output:
         ax.set_title(f"Av. Ohmic power ({self.t[it1]:.3f}-{self.t[it2]:.3f}s)")
         ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
 
         ax.text(
             0.85,
@@ -6514,7 +6527,6 @@ class transp_output:
             transform=ax.transAxes,
         )
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # --------------------------------------------------------
 
@@ -6530,9 +6542,8 @@ class transp_output:
         ax.set_title(f"Av. Temperatures ({self.t[it1]:.3f}-{self.t[it2]:.3f}s)")
         ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax3
 
@@ -6546,9 +6557,8 @@ class transp_output:
         ax.set_title(f"Av. Fluxes ({self.t[it1]:.3f}-{self.t[it2]:.3f}s)")
         ax.set_xlim([0, 1])
         ax.axhline(y=0, ls="--", c="k")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotUmag(self, fig=None, time=None):
         if time is None:
@@ -6575,8 +6585,6 @@ class transp_output:
 
         self.plotPoyntingFluxBalance_total(ax1, ax2=ax2, onlyBeforeSaw=True, time=time)
 
-        GRAPHICStools.addDenseAxis(ax1)
-        GRAPHICStools.addDenseAxis(ax2)
 
         ##
         ax = ax4
@@ -6586,7 +6594,6 @@ class transp_output:
         ax.legend(loc="lower left")
         ax.set_ylim([0, np.max(self.psi_bnd) * 2])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax4.twinx()
         ax.plot(self.t, self.phi_bnd, c="b", ls="-", lw=2, label="$\\phi_{bound}$")
@@ -6604,7 +6611,6 @@ class transp_output:
         ax.set_xlabel("Time (s)")
         ax.set_ylim([0, np.max(self.Bp_ext[:, -1]) * 2])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax3.twinx()
         ax.plot(
@@ -6648,16 +6654,14 @@ class transp_output:
         # ax.legend(loc='best',prop={'size':self.mainLegendSize})
         GRAPHICStools.addLegendApart(ax, ratio=0.8)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Magn
         ax = ax6
         ax.plot(self.t, self.UmagT_pol, c="r", ls="-", lw=2, label="$U_{B_{\\theta}}$")
         ax.set_ylabel("Poloidal magnetic energy (MJ)")
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
         ax.set_xlabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax6.twinx()
         ax.plot(
@@ -6954,7 +6958,6 @@ class transp_output:
 
         ax1.set_xlabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax1)
 
         # Detail
         if self.calcualtePorcelli:
@@ -6962,18 +6965,16 @@ class transp_output:
             GRAPHICStools.addLegendApart(ax1s, ratio=0.7)
         ax1s.set_title("Porcelli Parameters")
         ax1s.set_xlabel("Time (s)")
-        GRAPHICStools.addDenseAxis(ax1s)
 
         ax2s.plot(self.t, self.porcelli_s1, c="b", label="$s_1$")
-        ax2s.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax2s.legend(loc="upper left")
         ax2s.set_ylabel("Magnetic shear")
 
         ax = ax2s.twinx()
         ax.plot(self.t, self.porcelli_rq1, c="r", label="$r_1$")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
         ax.set_ylabel("Minor radius q=1")
 
-        GRAPHICStools.addDenseAxis(ax2s)
 
         ax2s.set_xlabel("Time (s)")
 
@@ -7018,7 +7019,6 @@ class transp_output:
 
         GRAPHICStools.addLegendApart(ax2, ratio=0.7)
 
-        GRAPHICStools.addDenseAxis(ax2)
 
         ax2.set_xlabel("Time (s)")
 
@@ -7033,14 +7033,13 @@ class transp_output:
                 label=f"q @ $\\rho_N$={self.xb_lw[irho]:.3f}",
             )
 
-        ax3e.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax3e.legend(loc="best")
         ax3e.set_ylabel("q")
         ax3e.set_title("First 10 radii of q-profile")
         ax3e.axhline(y=1.0, ls="--", c="k", lw=0.5)
 
         GRAPHICStools.addLegendApart(ax3e, ratio=0.7, size=6)
 
-        GRAPHICStools.addDenseAxis(ax3e)
 
         ax3e.set_xlabel("Time (s)")
 
@@ -7061,7 +7060,7 @@ class transp_output:
 
         ax3.axhline(y=1.0, ls="--", c="k", lw=1)
 
-        ax3.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax3.legend(loc="best")
         ax3.set_ylabel("q")
         ax3.set_ylim([np.max([0.80, minn]), np.min([1.3, maxx])])
 
@@ -7069,7 +7068,6 @@ class transp_output:
 
         ax3.set_xlim([self.t[0] - 0.01, self.t[-1] + 0.01])
 
-        GRAPHICStools.addDenseAxis(ax3)
 
         ax3.set_xlabel("Time (s)")
 
@@ -7138,7 +7136,6 @@ class transp_output:
         ax.set_ylim([-0.01, self.psi_heli[it].max() * 1.1])
         ax.set_xlabel("r/a")
         ax.axhline(y=0.0, ls="--", c="k", lw=1)
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = fig.add_subplot(grid[1, 0], sharex=ax)
         it, comp = self.plotAroundSawtooth(
@@ -7156,7 +7153,6 @@ class transp_output:
         ax1.set_xlabel("r/a")
         ax1.set_ylim([self.q[it].min(), 1.3])
         ax1.axhline(y=1.0, ls="--", c="k", lw=1)
-        GRAPHICStools.addDenseAxis(ax1)
 
         [x_saw_r1l, x_saw_r1, x_saw_r1r, x_saw_r2l, x_saw_r2, x_saw_r2r] = comp
 
@@ -7185,7 +7181,6 @@ class transp_output:
         ax.plot(xx, yy, ls="-.", lw=1.0, c="k", label="$\\sim r^2$")
 
         ax.legend()
-        GRAPHICStools.addDenseAxis(ax)
 
         # -------
 
@@ -7217,9 +7212,8 @@ class transp_output:
             ls="-.",
             label="$p_{expected}$",
         )
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         GRAPHICStools.fillGraph(
             ax,
@@ -7282,8 +7276,7 @@ class transp_output:
             ls="-.",
             label="$T_{expected}$",
         )
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
-        GRAPHICStools.addDenseAxis(ax)
+        ax.legend(loc="upper right")
 
         ax = fig.add_subplot(grid[0, 2])
         ax.plot(self.t, self.UmagT_pol, lw=2, c="r", label="$U_{B_{\\theta}}$")
@@ -7301,8 +7294,7 @@ class transp_output:
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("MJ")
         ax.set_title("Electrons-Bpol Balance")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
-        GRAPHICStools.addDenseAxis(ax)
+        ax.legend(loc="best")
 
         ax = fig.add_subplot(grid[1, 2])
         Delta1 = self.Umag_pol[self.ind_saw_after] - self.Umag_pol[self.ind_saw_before]
@@ -7325,7 +7317,6 @@ class transp_output:
         ax.set_ylabel("$MJ/m^3$")
         ax.legend(loc="lower right")
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotAroundSawtoothQuantities(self, fig=None, fractionExtend=0.5, alpha=0.3):
         if fig is None:
@@ -7347,7 +7338,6 @@ class transp_output:
         ax1.set_ylabel("q")
         ax1.set_ylim([0.8, 1.2])
         ax1.axhline(y=1.0, ls="--", c="k", lw=1)
-        ax1.grid()
 
         ax = fig.add_subplot(grid[0, 1], sharex=ax1)
         _, _ = self.plotAroundSawtooth(
@@ -7362,7 +7352,6 @@ class transp_output:
         ax.set_title("Current profile")
         ax.set_ylabel("j ($MA/m^2$)")
         ax.set_ylim(bottom=0)
-        ax.grid()
 
         ax = fig.add_subplot(grid[1, 0], sharex=ax1)
         _, _ = self.plotAroundSawtooth(
@@ -7377,7 +7366,6 @@ class transp_output:
         ax.set_title("Electron temperature")
         ax.set_ylabel("Te (keV)")
         ax.set_ylim(bottom=0)
-        ax.grid()
 
         ax = fig.add_subplot(grid[1, 1], sharex=ax1)
         _, _ = self.plotAroundSawtooth(
@@ -7392,7 +7380,6 @@ class transp_output:
         ax.set_title("Ion temperature")
         ax.set_ylabel("Ti (keV)")
         ax.set_ylim(bottom=0)
-        ax.grid()
 
         ax = fig.add_subplot(grid[0, 2], sharex=ax1)
         _, _ = self.plotAroundSawtooth(
@@ -7407,7 +7394,6 @@ class transp_output:
         ax.set_title("ICRF power to Bulk")
         ax.set_ylabel("P ($MW/m^3$)")
         ax.set_ylim(bottom=0)
-        ax.grid()
 
         ax = fig.add_subplot(grid[1, 2], sharex=ax1)
         _, _ = self.plotAroundSawtooth(
@@ -7422,7 +7408,6 @@ class transp_output:
         ax.set_title("Alpha power to Bulk")
         ax.set_ylabel("P ($MW/m^3$)")
         ax.set_ylim(bottom=0)
-        ax.grid()
 
         ax = fig.add_subplot(grid[2, 0], sharex=ax1)
         _, _ = self.plotAroundSawtooth(
@@ -7437,7 +7422,6 @@ class transp_output:
         ax.set_title("Electron density")
         ax.set_ylabel("ne ($10^{20}m^{-3}$)")
         ax.set_ylim(bottom=0)
-        ax.grid()
 
         ax = fig.add_subplot(grid[2, 1], sharex=ax1)
         _, _ = self.plotAroundSawtooth(
@@ -7452,7 +7436,6 @@ class transp_output:
         ax.set_title("Fast ion pressure")
         ax.set_ylabel("p (MPa)")
         ax.set_ylim(bottom=0)
-        ax.grid()
 
         ax = fig.add_subplot(grid[2, 2], sharex=ax1)
         _, _ = self.plotAroundSawtooth(
@@ -7472,7 +7455,6 @@ class transp_output:
                 3 * (self.qe_obs[self.ind_saw].max() + self.qi_obs[self.ind_saw].max()),
             ]
         )
-        ax.grid()
 
     def plotICRF(self, fig=None, time=None):
         if time is None:
@@ -7508,14 +7490,13 @@ class transp_output:
             label="check (sum)",
         )
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Electrons")
         ax.set_ylabel("Power ($MWm^{-3}$)")
 
         ax.axhline(y=0, ls="--", c="k", lw=1)
         ax.set_xlabel("$\\rho_N$")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax.set_xlim([0, 1])
         # IONS
@@ -7532,14 +7513,13 @@ class transp_output:
             label="check (sum)",
         )
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Ions")
         ax.set_ylabel("Power ($MWm^{-3}$)")
 
         ax.axhline(y=0, ls="--", c="k", lw=1)
         ax.set_xlabel("$\\rho_N$")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # MINORITY
         ax = ax3
@@ -7574,14 +7554,13 @@ class transp_output:
             label="check (bal)",
         )
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Minorities Balance")
         ax.set_ylabel("Power ($MWm^{-3}$)")
         ax.set_xlabel("$\\rho_N$")
 
         ax.axhline(y=0, ls="--", c="k", lw=1)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # TOTAL
         ax = ax4
@@ -7623,14 +7602,13 @@ class transp_output:
 
         ax.axhline(y=0, ls="--", c="k", lw=1)
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Total Balance")
         ax.set_ylabel("Power ($MWm^{-3}$)")
         ax.set_xlabel("$\\rho_N$")
 
         ax.set_ylim(bottom=-2.0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Machine
         ax = ax6
@@ -7665,9 +7643,8 @@ class transp_output:
         ax.set_ylabel("Power ($MW$)")
         ax.set_xlabel("$\\rho_N$")
         ax.set_xlim([0, 1])
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotICRF_t(self, fig=None):
         if fig is None:
@@ -7696,8 +7673,7 @@ class transp_output:
             label="check (sum)",
         )
 
-        GRAPHICStools.addLegendApart(ax, ratio=0.85, size=self.mainLegendSize)
-        GRAPHICStools.addDenseAxis(ax)
+        GRAPHICStools.addLegendApart(ax, ratio=0.85)
 
         ax.set_title("Electrons")
         ax.set_ylabel("Power ($MW$)")
@@ -7723,8 +7699,7 @@ class transp_output:
         ax.set_ylabel("Power ($MW$)")
         ax.set_xlabel("Time (s)")
 
-        GRAPHICStools.addLegendApart(ax, ratio=0.85, size=self.mainLegendSize)
-        GRAPHICStools.addDenseAxis(ax)
+        GRAPHICStools.addLegendApart(ax, ratio=0.85)
 
         # MINORITY
         ax = ax3
@@ -7759,8 +7734,7 @@ class transp_output:
         ax.set_ylabel("Power ($MW$)")
         ax.set_xlabel("Time (s)")
 
-        GRAPHICStools.addLegendApart(ax, ratio=0.85, size=self.mainLegendSize)
-        GRAPHICStools.addDenseAxis(ax)
+        GRAPHICStools.addLegendApart(ax, ratio=0.85)
 
         # TOTAL
         ax = ax4
@@ -7778,8 +7752,7 @@ class transp_output:
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addLegendApart(ax, ratio=0.85, size=self.mainLegendSize)
-        GRAPHICStools.addDenseAxis(ax)
+        GRAPHICStools.addLegendApart(ax, ratio=0.85)
 
         # TOTAL
         ax = ax6
@@ -7797,8 +7770,7 @@ class transp_output:
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addLegendApart(ax, ratio=0.85, size=self.mainLegendSize)
-        GRAPHICStools.addDenseAxis(ax)
+        GRAPHICStools.addLegendApart(ax, ratio=0.85)
 
 
     def plotRelevantResonances(self, ax, Fich, time=None, legendYN=False, lw=3):
@@ -7845,7 +7817,7 @@ class transp_output:
                     )
 
         if legendYN:
-            ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+            ax.legend(loc="upper right")
 
     def plotLowerHybrid(self, fig=None, time=None):
         if time is None:
@@ -7871,12 +7843,12 @@ class transp_output:
         ax.plot(self.x_lw, self.Plhe[i1], lw=4, c="r", label="Electrons")
         ax.plot(self.x_lw, self.Plhi[i1], lw=4, c="b", label="Ions")
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Deposited Power")
         ax.set_ylabel("Power ($MWm^{-3}$)")
         ax.set_xlabel("$\\rho_N$")
         ax.set_xlim([0, 1.0])
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
         for i in rhos:
             ax.axvline(x=i, ls="--", c="k", lw=0.5)
 
@@ -7885,11 +7857,11 @@ class transp_output:
         ax.plot(self.t, self.PlheT, lw=4, c="r", label="Electrons")
         ax.plot(self.t, self.PlhiT, lw=4, c="b", label="Ions")
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Deposited Power")
         ax.set_ylabel("Power ($MW$)")
         ax.set_xlabel("Time (s)")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
         # Time
         ax = ax4
@@ -7898,11 +7870,11 @@ class transp_output:
             ax.plot(self.t, self.Plhe[:, ix], lw=2, c="r")
             ax.plot(self.t, self.Plhi[:, ix], lw=2, c="b")
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Deposited Power")
         ax.set_ylabel("Power ($MWm^{-3}$)")
         ax.set_xlabel("Time (s)")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
     def plotECRF(self, fig=None, time=None):
         if time is None:
@@ -7938,7 +7910,7 @@ class transp_output:
         ptot = np.sum(self.Pech_ant[:, i1, :], axis=0)
         ax.plot(self.x_lw, ptot, lw=2, c="y", ls="--")  # ,label='check')
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Deposited Power")
         ax.set_ylabel("Power ($MWm^{-3}$)")
         ax.set_xlabel("$\\rho_N$")
@@ -7961,7 +7933,7 @@ class transp_output:
         ptot = np.sum(self.jECH_ant[:, i1, :], axis=0)
         ax.plot(self.x_lw, ptot, lw=2, c="y", ls="--")  # ,label='check')
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Deposited Current Drive")
         ax.set_ylabel("Current density($MAm^{-2}$)")
         ax.set_xlabel("$\\rho_N$")
@@ -8019,104 +7991,108 @@ class transp_output:
         if fig is None:
             fig = plt.figure()
 
-        grid = plt.GridSpec(2, 3, hspace=0.2, wspace=0.4)
+        grid = plt.GridSpec(2, 4, hspace=0.45, wspace=0.5)
 
-        ax1 = fig.add_subplot(grid[0, 1])
-        ax2 = fig.add_subplot(grid[1, 1], sharex=ax1, sharey=ax1)
-
-        ax3 = fig.add_subplot(grid[1, 2], sharex=ax1)
-        ax4 = fig.add_subplot(grid[0, 2], sharex=ax1)
-
-        ax0 = fig.add_subplot(grid[0, 0])
+        ax1  = fig.add_subplot(grid[0, 1])
+        ax2  = fig.add_subplot(grid[1, 1], sharex=ax1, sharey=ax1)
+        ax4  = fig.add_subplot(grid[0, 2], sharex=ax1)
+        ax3  = fig.add_subplot(grid[1, 2], sharex=ax1)
+        ax6  = fig.add_subplot(grid[0, 3], sharex=ax1)
+        ax5  = fig.add_subplot(grid[1, 3], sharex=ax1)
+        ax0  = fig.add_subplot(grid[0, 0])
         ax0e = fig.add_subplot(grid[1, 0])
 
-        # Ions
-        col = ["b", "r", "g", "m", "c", "y", "orange", "sienna"]
+        col = get_colors()
+        _ls  = {"lw": 2, "alpha": 0.8}
+        _leg = {"loc": "best", "framealpha": 0.7}
+
+        _chk = {"lw": 2, "c": "y", "ls": "--"}   # style for all beam-sum checks
+
+        # --- Power to ions ---
         ax = ax1
-        ax.plot(self.x_lw, self.Pnbii[i1], lw=4, c="k", label="$P$")
+        ax.plot(self.x_lw, self.Pnbii[i1], lw=3, c="k", label="total")
         for i in range(len(self.Pnbii_beam)):
             if np.sum(self.Pnbii_beam[i][i1]) > 0.0 + self.eps00 * (len(self.t) + 1):
-                ax.plot(
-                    self.x_lw,
-                    self.Pnbii_beam[i][i1],
-                    lw=2,
-                    c=col[i],
-                    label=f"beam #{i + 1}",
-                )
-        ptot = np.sum(self.Pnbii_beam[:, i1, :], axis=0)
-        ax.plot(self.x_lw, ptot, lw=3, c="y", ls="--", label="check")
-
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
-        ax.set_title("Deposited Power to Ions")
-        ax.set_ylabel("Power ($MWm^{-3}$)")
-        ax.set_xlabel("$\\rho_N$")
+                ax.plot(self.x_lw, self.Pnbii_beam[i][i1], c=col[i], **_ls)
+        ax.plot(self.x_lw, np.sum(self.Pnbii_beam[:, i1, :], axis=0), label=r"$\Sigma$ beams", **_chk)
+        ax.legend(**_leg)
+        ax.set_title("Power to ions")
+        ax.set_ylabel(r"$P_i$ ($MWm^{-3}$)")
+        ax.set_xlabel(r"$\rho_N$")
+        ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
 
-        # Electrons
+        # --- Power to electrons ---
         ax = ax2
-        ax.plot(self.x_lw, self.Pnbie[i1], lw=4, c="k", label="$P$")
+        ax.plot(self.x_lw, self.Pnbie[i1], lw=3, c="k", label="total")
         for i in range(len(self.Pnbie_beam)):
             if np.sum(self.Pnbie_beam[i][i1]) > 0.0 + self.eps00 * (len(self.t) + 1):
-                ax.plot(
-                    self.x_lw,
-                    self.Pnbie_beam[i][i1],
-                    lw=2,
-                    c=col[i],
-                    label=f"beam #{i + 1}",
-                )
-        ptot = np.sum(self.Pnbie_beam[:, i1, :], axis=0)
-        ax.plot(self.x_lw, ptot, lw=3, c="y", ls="--", label="check")
-
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
-        ax.set_title("Deposited Power to Electrons")
-        ax.set_ylabel("Power ($MWm^{-3}$)")
-        ax.set_xlabel("$\\rho_N$")
+                ax.plot(self.x_lw, self.Pnbie_beam[i][i1], c=col[i], **_ls)
+        ax.plot(self.x_lw, np.sum(self.Pnbie_beam[:, i1, :], axis=0), label=r"$\Sigma$ beams", **_chk)
+        ax.legend(**_leg)
+        ax.set_title("Power to electrons")
+        ax.set_ylabel(r"$P_e$ ($MWm^{-3}$)")
+        ax.set_xlabel(r"$\rho_N$")
+        ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
 
-        # Particle
-        ax = ax3
-        parttot = copy.deepcopy(self.x_lw) * 0.0
-        for i in range(len(self.Pnbie_beam)):
-            if np.sum(self.Pnbip_beam[i][i1]) > 0.0 + self.eps00 * (len(self.t) + 1):
-                ax.plot(
-                    self.x_lw,
-                    self.Pnbip_beam[i][i1],
-                    lw=2,
-                    c=col[i],
-                    label=f"beam #{i + 1}",
-                )
-                parttot += self.Pnbip_beam[i][i1]
-        ax.plot(self.x_lw, parttot, lw=3, c="k", label="S")
-
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
-        ax.set_title("Ion deposition")
-        ax.set_ylabel("Source ($10^{20}/m^{-3}/s$)")
-        ax.set_xlabel("$\\rho_N$")
-
-        ax.set_xlim([0, 1.0])
-        ax.set_ylim(bottom=0)
-
-        # Current
+        # --- Torque per beam ---
         ax = ax4
-        ax.plot(self.x_lw, self.jNBI[i1], lw=4, c="k", label="$J_{NBI}$")
+        for i in range(len(self.Pnbii_beam)):
+            if np.sum(self.Pnbit_beam[i][i1]) > 0.0 + self.eps00 * (len(self.t) + 1):
+                ax.plot(self.x_lw, self.Pnbit_beam[i][i1], c=col[i % len(col)], **_ls)
+        tq_total = self.Pnbit_coll[i1] + self.Pnbit_jxb[i1] + self.Pnbit_therm[i1]
+        ax.plot(self.x_lw, tq_total, lw=3, c="k", ls="-", label="total")
+        ax.plot(self.x_lw, np.sum(self.Pnbit_beam[:, i1, :], axis=0), label=r"$\Sigma$ beams", **_chk)
+        ax.legend(**_leg)
+        ax.set_title("Torque per beam")
+        ax.set_ylabel(r"$M$ ($Nm^{-3}$)")
+        ax.set_xlabel(r"$\rho_N$")
+        ax.set_xlim([0, 1])
+
+        # --- Torque breakdown by mechanism ---
+        ax = ax3
+        tq_total = self.Pnbit_coll[i1] + self.Pnbit_jxb[i1] + self.Pnbit_therm[i1]
+        ax.plot(self.x_lw, tq_total,                            lw=3, c="k",          ls="-",  label="total")
+        ax.plot(self.x_lw, self.Pnbit_coll[i1],                lw=2, c="royalblue",  ls="-",  label="collisional")
+        ax.plot(self.x_lw, self.Pnbit_e[i1]+self.Pnbit_i[i1], lw=2, c="y",          ls="--", label="coll. (e+i)")
+        ax.plot(self.x_lw, self.Pnbit_jxb[i1],                lw=2, c="darkorange", ls="-",  label="JxB")
+        ax.plot(self.x_lw, self.Pnbit_therm[i1],              lw=2, c="purple",     ls="-",  label="therm.")
+        ax.legend(**_leg)
+        ax.set_title("Torque breakdown")
+        ax.set_ylabel(r"$M$ ($Nm^{-3}$)")
+        ax.set_xlabel(r"$\rho_N$")
+        ax.set_xlim([0, 1])
+
+        # --- Current drive ---
+        ax = ax6
+        ax.plot(self.x_lw, self.jNBI[i1], lw=3, c="k", label="total")
         for i in range(len(self.Pnbii_beam)):
             if np.sum(self.Pnbii_beam[i][i1]) > 0.0 + self.eps00 * (len(self.t) + 1):
-                ax.plot(
-                    self.x_lw,
-                    self.jNBI_beam[i][i1],
-                    lw=2,
-                    c=col[i],
-                    label=f"beam #{i + 1}",
-                )
-        ptot = np.sum(self.jNBI_beam[:, i1, :], axis=0)
-        ax.plot(self.x_lw, ptot, lw=3, c="y", ls="--", label="check")
+                ax.plot(self.x_lw, self.jNBI_beam[i][i1], c=col[i], **_ls)
+        ax.plot(self.x_lw, np.sum(self.jNBI_beam[:, i1, :], axis=0), label=r"$\Sigma$ beams", **_chk)
+        ax.legend(**_leg)
+        ax.set_title("Current drive")
+        ax.set_ylabel(r"$j_{NBI}$ ($MAm^{-2}$)")
+        ax.set_xlabel(r"$\rho_N$")
+        ax.set_xlim([0, 1])
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
-        ax.set_title("Beam current drive")
-        ax.set_ylabel("Current density ($MAm^{-2}$)")
-        ax.set_xlabel("$\\rho_N$")
+        # --- Particle deposition ---
+        ax = ax5
+        parttot = np.zeros_like(self.x_lw)
+        for i in range(len(self.Pnbie_beam)):
+            if np.sum(self.Pnbip_beam[i][i1]) > 0.0 + self.eps00 * (len(self.t) + 1):
+                ax.plot(self.x_lw, self.Pnbip_beam[i][i1], c=col[i], label=f"#{i+1}", **_ls)
+                parttot += self.Pnbip_beam[i][i1]
+        ax.plot(self.x_lw, parttot, label=r"$\Sigma$ beams", **_chk)
+        GRAPHICStools.addLegendApart(ax, ratio=0.82)
+        ax.set_title("Particle deposition")
+        ax.set_ylabel(r"$S_n$ ($10^{20}m^{-3}s^{-1}$)")
+        ax.set_xlabel(r"$\rho_N$")
+        ax.set_xlim([0, 1])
+        ax.set_ylim(bottom=0)
 
-        # Machine
+        # --- Machine cross-section views ---
         self.plotGeometry(ax=ax0, color="b")
         self.plotNBItrajectories(time=timeReq, ax=ax0, topDown=False, col=col)
 
@@ -8139,33 +8115,88 @@ class transp_output:
         if ax is None:
             fig, ax = plt.subplots()
 
-        cont = 0
-        if hasattr(self, "beam_trajectories") and self.beam_trajectories is not None:
-            for i in range(len(self.Pnbii_beam)):
-                if np.sum(self.Pnbii_beam[i][i1]) > 0.0 + self.eps00 * (
-                    len(self.t) + 1
-                ):
-                    f = cont**2 / 8
-                    cont += 1
-                    if topDown:
-                        ax.plot(
-                            self.beam_trajectories["xlin"][i],
-                            self.beam_trajectories["ylin"][i],
-                            lw=3 - f,
-                            c=col[i],
-                            label=f"beam #{i + 1}",
-                        )
-                    else:
-                        ax.plot(
-                            self.beam_trajectories["rlin"][i],
-                            self.beam_trajectories["zlin"][i],
-                            lw=3 - f,
-                            c=col[i],
-                            label=f"beam #{i + 1}",
-                        )
+        if not (hasattr(self, "beam_trajectories") and self.beam_trajectories is not None):
+            return
+
+        # Collect active beam indices
+        active = [
+            i for i in range(len(self.Pnbii_beam))
+            if np.sum(self.Pnbii_beam[i][i1]) > 0.0 + self.eps00 * (len(self.t) + 1)
+        ]
+
+        # --- Plot trajectories with transparency ---
+        for i in active:
+            c = col[i % len(col)]
+            if topDown:
+                ax.plot(
+                    self.beam_trajectories["xlin"][i],
+                    self.beam_trajectories["ylin"][i],
+                    lw=3.0, c=c, alpha=0.45, label=f"beam #{i + 1}",
+                )
+            else:
+                ax.plot(
+                    self.beam_trajectories["rlin"][i],
+                    self.beam_trajectories["zlin"][i],
+                    lw=3.0, c=c, alpha=0.45, label=f"beam #{i + 1}",
+                )
+
+        # --- Beam-number labels with overlap avoidance ---
+        if active:
+            # Initial label positions: beam entry point nudged away from the vessel center
+            lbl = []
+            for i in active:
+                if topDown:
+                    x0 = self.beam_trajectories["xlin"][i][0]
+                    y0 = self.beam_trajectories["ylin"][i][0]
+                    R0 = np.hypot(x0, y0) + 1e-12
+                    lbl.append([x0 / R0 * (R0 + 0.18), y0 / R0 * (R0 + 0.18)])
+                else:
+                    r0 = self.beam_trajectories["rlin"][i][0]
+                    z0 = self.beam_trajectories["zlin"][i][0]
+                    lbl.append([r0 + 0.08, z0])
+
+            lbl = np.array(lbl, dtype=float)
+
+            # Iterative pairwise repulsion — stops early when nothing overlaps
+            min_sep = 0.13 if topDown else 0.06   # metres
+            for _ in range(120):
+                any_moved = False
+                for j in range(len(lbl)):
+                    for k in range(j + 1, len(lbl)):
+                        dx = lbl[k, 0] - lbl[j, 0]
+                        dy = lbl[k, 1] - lbl[j, 1]
+                        dist = np.hypot(dx, dy) + 1e-12
+                        if dist < min_sep:
+                            push = (min_sep - dist) * 0.5
+                            lbl[j, 0] -= push * dx / dist
+                            lbl[j, 1] -= push * dy / dist
+                            lbl[k, 0] += push * dx / dist
+                            lbl[k, 1] += push * dy / dist
+                            any_moved = True
+                if not any_moved:
+                    break
+
+            # Draw annotated labels with a thin connecting line to beam entry
+            for idx, i in enumerate(active):
+                c = col[i % len(col)]
+                if topDown:
+                    x0 = self.beam_trajectories["xlin"][i][0]
+                    y0 = self.beam_trajectories["ylin"][i][0]
+                else:
+                    x0 = self.beam_trajectories["rlin"][i][0]
+                    y0 = self.beam_trajectories["zlin"][i][0]
+                ax.annotate(
+                    f"#{i + 1}",
+                    xy=(x0, y0),
+                    xytext=(lbl[idx, 0], lbl[idx, 1]),
+                    fontsize=6,
+                    ha="center", va="center",
+                    color=c,
+                    arrowprops=dict(arrowstyle="-", color=c, lw=0.5, alpha=0.6),
+                )
 
         if leg:
-            ax.legend(loc="best", prop={"size": self.mainLegendSize})
+            ax.legend(loc="best")
 
     def plotSeparateSystems(self, fig=None):
         if fig is None:
@@ -8192,16 +8223,14 @@ class transp_output:
         ax.set_ylabel("Power ($MW$)")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax0e
         ax.plot(self.t, self.IpOH, lw=2, label="$I_{p,OH}$")
         ax.plot(self.t, self.Ip, lw=2, label="$I_{p,tot}$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylabel("$I_{p}$ ($MA$)")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
         # ICRF
         ax = ax1
@@ -8235,34 +8264,31 @@ class transp_output:
             # ax1.set_ylim([0,20])
             # ax1.set_ylabel('Error (%)')
 
-            ax.legend(loc="best", prop={"size": self.mainLegendSize})
+            ax.legend(loc="best")
         ax.set_title("ICRF")
         ax.set_ylabel("Power Antenna ($MW$)")
         ax.set_ylim(bottom=0)
         ax.set_xlabel("Time (s)")
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax1e
         if np.sum(self.PichT) > 1.0e-5:
             for i in range(len(self.FichT_ant)):
                 ax.plot(self.t, self.FichT_ant[i], lw=2, label=f"{i + 1}")
-            ax.legend(loc="best", prop={"size": self.mainLegendSize})
+            ax.legend(loc="best")
         ax.set_ylabel("Frequency Antenna ($MHz$)")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
         # ECRF
         ax = ax2
         if np.sum(self.PechT) > 1.0e-5:
             for i in range(len(self.PechT_ant)):
                 ax.plot(self.t, self.PechT_ant[i], lw=2, label=f"{i + 1}")
-            ax.legend(loc="best", prop={"size": self.mainLegendSize})
+            ax.legend(loc="best")
         ax.set_title("ECRF")
         ax.set_ylabel("Power Antenna ($MW$)")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax2e
         if hasattr(self, "F_gyr") and self.F_gyr is not None:
@@ -8273,11 +8299,10 @@ class transp_output:
                     lw=2,
                     label=f"{i + 1}",
                 )
-            ax.legend(loc="best", prop={"size": self.mainLegendSize})
+            ax.legend(loc="best")
         ax.set_ylabel("Frequency Antenna ($GHz$)")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
         # NBI
         ax = ax3
@@ -8289,12 +8314,11 @@ class transp_output:
                     lw=2,
                     label=f"{i + 1}",
                 )
-            ax.legend(loc="best", prop={"size": self.mainLegendSize})
+            ax.legend(loc="best")
         ax.set_title("NBI")
         ax.set_ylabel("Power Beam ($MW$)")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
         GRAPHICStools.adjust_figure_layout(fig)
 
@@ -8385,12 +8409,11 @@ class transp_output:
         ax1.plot(self.xb[i1], self.roa[i1], ls="-", lw=3, label="$r/a$")
 
         ax1.set_xlabel("$\\rho_n=\\rho_{tor}$")
-        ax1.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax1.legend(loc="upper left")
 
         ax1.set_xlim([0, 1])
         ax1.set_ylim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax1)
 
         # Elong
         ax2.plot(self.psin[i1], self.kappaS[i1], "r", ls="-", lw=3, label="$\\kappa$")
@@ -8399,7 +8422,7 @@ class transp_output:
         ax2.set_xlabel("$\\psi_n$")
         ax2.set_ylabel("$\\kappa$")
         ax2.set_ylim([1.0, np.max(self.kappaS[i1])])
-        ax2.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax2.legend(loc="upper left")
 
         ax2.axvline(x=0.95, c="k", ls="--")
         ax2.axvline(x=0.995, c="k", ls="--")
@@ -8424,7 +8447,6 @@ class transp_output:
             transform=ax2.transAxes,
         )
 
-        GRAPHICStools.addDenseAxis(ax2)
 
         # Triang
         ax22 = ax3
@@ -8447,7 +8469,7 @@ class transp_output:
         ax22.set_xlabel("$\\psi_n$")
         ax22.set_ylabel("$\\delta$")
         # ax22.set_ylim([np.min(self.deltaS[i1]),np.max(self.deltaS[i1])])
-        ax22.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax22.legend(loc="upper left")
 
         ax22.set_xlim([0, 1])
 
@@ -8467,7 +8489,6 @@ class transp_output:
             transform=ax22.transAxes,
         )
 
-        GRAPHICStools.addDenseAxis(ax22)
 
     def plotHeating(self, fig=None):
         if fig is None:
@@ -8499,12 +8520,11 @@ class transp_output:
         ax1.plot(self.t, self.PichT_MC, "k", ls="-.", lw=1, label="$P_{MC}$")
         ax1.plot(self.t, self.PfichT_dir, "k", ls=":", lw=1, label="$P_{dir,f}$")
 
-        GRAPHICStools.addDenseAxis(ax1)
 
         ax1.set_ylabel("Power (MW)")
         ax1.set_title("ICRF")
         # ax1.legend(loc='best')
-        GRAPHICStools.addLegendApart(ax1, ratio=0.8, size=self.mainLegendSize)
+        GRAPHICStools.addLegendApart(ax1, ratio=0.8)
 
         ax1.set_xlabel("Time (s)")
 
@@ -8514,8 +8534,7 @@ class transp_output:
         ax2.plot(self.t, self.PechT_check, "y", ls="--", lw=1, label="check (int)")
 
         ax2.set_title("ECRF")
-        GRAPHICStools.addLegendApart(ax2, ratio=0.8, size=self.mainLegendSize)
-        GRAPHICStools.addDenseAxis(ax2)
+        GRAPHICStools.addLegendApart(ax2, ratio=0.8)
 
         ax2.set_xlabel("Time (s)")
 
@@ -8549,8 +8568,7 @@ class transp_output:
         )
 
         ax3.set_title("NBI")
-        GRAPHICStools.addDenseAxis(ax3)
-        GRAPHICStools.addLegendApart(ax3, ratio=0.8, size=self.mainLegendSize)
+        GRAPHICStools.addLegendApart(ax3, ratio=0.8)
 
         ax3.set_xlabel("Time (s)")
 
@@ -8560,8 +8578,7 @@ class transp_output:
         ax7.plot(self.t, self.PfusiT, "g", ls="-", lw=1, label="$P_{fus,i}$")
 
         ax7.set_title("ALPHAS")
-        GRAPHICStools.addDenseAxis(ax7)
-        GRAPHICStools.addLegendApart(ax7, ratio=0.8, size=self.mainLegendSize)
+        GRAPHICStools.addLegendApart(ax7, ratio=0.8)
 
         ax7.set_xlabel("Time (s)")
 
@@ -8583,8 +8600,7 @@ class transp_output:
         )
 
         ax4.set_title("Ion Heating")
-        GRAPHICStools.addDenseAxis(ax4)
-        GRAPHICStools.addLegendApart(ax4, ratio=0.8, size=self.mainLegendSize)
+        GRAPHICStools.addLegendApart(ax4, ratio=0.8)
 
         ax4.set_ylabel("Power (MW)")
         ax4.set_xlabel("Time (s)")
@@ -8607,8 +8623,7 @@ class transp_output:
         )
 
         ax5.set_title("Electron Heating")
-        GRAPHICStools.addDenseAxis(ax5)
-        GRAPHICStools.addLegendApart(ax5, ratio=0.8, size=self.mainLegendSize)
+        GRAPHICStools.addLegendApart(ax5, ratio=0.8)
         ax5.set_xlabel("Time (s)")
 
         # Total heating
@@ -8643,8 +8658,7 @@ class transp_output:
         )
 
         ax6.set_title("Ions+Electrons")
-        GRAPHICStools.addDenseAxis(ax6)
-        GRAPHICStools.addLegendApart(ax6, ratio=0.8, size=self.mainLegendSize)
+        GRAPHICStools.addLegendApart(ax6, ratio=0.8)
         ax6.set_xlabel("Time (s)")
 
         # Total loss
@@ -8682,8 +8696,7 @@ class transp_output:
         )
 
         ax8.set_title("Losses")
-        GRAPHICStools.addDenseAxis(ax8)
-        GRAPHICStools.addLegendApart(ax8, ratio=0.8, size=self.mainLegendSize)
+        GRAPHICStools.addLegendApart(ax8, ratio=0.8)
         ax8.set_xlabel("Time (s)")
 
     def plotRadialPower(self, ax=None, time=None, fig=None, figCum=None):
@@ -8732,9 +8745,8 @@ class transp_output:
 
         ax1.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax1)
 
-        ax1.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax1.legend(loc="best")
         ax1.set_title("Electrons Power Sources")
         ax1.set_ylabel("Power ($MWm^{-3}$)")
         ax1.set_xlabel("$\\rho_N$")
@@ -8759,9 +8771,8 @@ class transp_output:
 
         ax2.axhline(y=0, ls="--", c="k", lw=1)
 
-        GRAPHICStools.addDenseAxis(ax2)
 
-        ax2.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax2.legend(loc="best")
         ax2.set_title("Ions Power Sources")
         ax2.set_ylabel("Power ($MWm^{-3}$)")
         ax2.set_xlabel("$\\rho_N$")
@@ -8798,9 +8809,8 @@ class transp_output:
 
         ax3.axhline(y=0, ls="--", c="k", lw=1)
 
-        GRAPHICStools.addDenseAxis(ax3)
 
-        ax3.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax3.legend(loc="best")
         ax3.set_title("Electrons Power Sinks")
         ax3.set_ylabel("Power ($MWm^{-3}$)")
         ax3.set_xlabel("$\\rho_N$")
@@ -8836,9 +8846,8 @@ class transp_output:
 
         ax4.axhline(y=0, ls="--", c="k", lw=1)
 
-        GRAPHICStools.addDenseAxis(ax4)
 
-        ax4.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax4.legend(loc="best")
         ax4.set_title("Ions Power Sinks")
         ax4.set_ylabel("Power ($MWm^{-3}$)")
         ax4.set_xlabel("$\\rho_N$")
@@ -8866,11 +8875,10 @@ class transp_output:
         ax.set_ylabel("Cumulative Power ($MW$)")
         ax.set_title("Electrons")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.axhline(y=0, ls="--", lw=1, c="k")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax2C
         ax.plot(self.x_lw, self.PiheatT_cum[i1, :], "r", ls="-", lw=3, label="$P_{IN}$")
@@ -8892,13 +8900,12 @@ class transp_output:
         ax.set_ylabel("Cumulative Power ($MW$)")
         ax.set_title("Ions")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.axhline(y=0, ls="--", lw=1, c="k")
 
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax3C
         ax.plot(
@@ -8923,12 +8930,11 @@ class transp_output:
 
         ax.axhline(y=1, ls="--", lw=1, c="k")
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotConvSolver_x(
         self,
@@ -9006,7 +9012,7 @@ class transp_output:
         if xlab:
             ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$Q$ ($MW/m^2$)")
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
         # ax.set_ylim(bottom=0)
 
         if alsoParticle:
@@ -9136,7 +9142,6 @@ class transp_output:
         # ax.axhline(y = self.Ti_avol[i1],c= 'b',lw=3,alpha=0.7)
         # ax.axhline(y = self.TZ_avol[i1],c= 'g',lw=1,alpha=0.7)
         addDetailsRho(ax, label="$T_e$, $T_i$ (keV)")  # ,title='Temperature Profiles')
-        GRAPHICStools.addDenseAxis(ax)
 
         # Temperature trace
         ax = axs[1]
@@ -9153,7 +9158,6 @@ class transp_output:
         ax.plot(self.t, self.Ti_avol, c="b", lw=4, alpha=1.0, label="$T_i$ vol.av.")
         ax.plot(self.t, self.TZ_avol, c="g", lw=1, alpha=1.0, label="$T_Z$ vol.av.")
         addDetailsTime(ax, label="$T_e$, $T_i$ (keV)")  # ,title='Temperature Traces')
-        GRAPHICStools.addDenseAxis(ax)
 
         # Combinations
         for it in i:
@@ -9227,7 +9231,6 @@ class transp_output:
             # ax.axhline(y = self.nHe4_avol[i1]*fact,c= 'm',lw=3,alpha=0.7)
 
         addDetailsRho(ax, label="$n$ ($10^{20}m^{-3}$)")  # ,title='Density Profiles')
-        GRAPHICStools.addDenseAxis(ax)
 
         # traces
         ax = axs[1]
@@ -9270,7 +9273,6 @@ class transp_output:
             ax.plot(self.t, self.nHe4_avol * fact, c="m", lw=4, alpha=1.0)
 
         addDetailsTime(ax, label="$n$ ($10^{20}m^{-3}$)")  # ,title='Density Traces')
-        GRAPHICStools.addDenseAxis(ax)
 
         # Combinations
         for it in i:
@@ -9312,24 +9314,15 @@ class transp_output:
         )
 
         ax1 = fig.add_subplot(grid[0, 0])
-        GRAPHICStools.addDenseAxis(ax1)
         ax2 = fig.add_subplot(grid[0, 1], sharex=ax1)
-        GRAPHICStools.addDenseAxis(ax2)
         ax3 = fig.add_subplot(grid[1, 0], sharex=ax1)
-        GRAPHICStools.addDenseAxis(ax3)
         ax4 = fig.add_subplot(grid[1, 1], sharex=ax1)
-        GRAPHICStools.addDenseAxis(ax4)
         ax4b = fig.add_subplot(grid[0, 2])
-        GRAPHICStools.addDenseAxis(ax4b)
         ax5 = fig.add_subplot(grid[1, 2])
-        GRAPHICStools.addDenseAxis(ax5)
 
         ax6 = fig.add_subplot(grid[2, 0])
-        GRAPHICStools.addDenseAxis(ax6)
         ax7 = fig.add_subplot(grid[2, 1])
-        GRAPHICStools.addDenseAxis(ax7)
         ax8 = fig.add_subplot(grid[2, 2])
-        GRAPHICStools.addDenseAxis(ax8)
 
         title = "rho = "
         for cont, i in enumerate(positions):
@@ -9374,7 +9367,7 @@ class transp_output:
 
             # GRAPHICStools.autoscale_y(ax)
 
-        ax1.set_title(title[:-2], fontsize=7)
+        ax1.set_title(title[:-2])
 
         # Chi Pert
 
@@ -9480,7 +9473,6 @@ class transp_output:
 
         ax.legend(loc="upper left", prop={"size": 10})
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax2
         ax.axhline(y=(self.dt * 1000.0).min(), ls="--", c="k", lw=0.3)
@@ -9493,7 +9485,6 @@ class transp_output:
 
         # ax.legend(loc='upper left',prop={'size':self.mainLegendSize})
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotTransport(self, fig=None, time=None, rhos=[0.0], complete=True):
         maxx = 0.89
@@ -9530,7 +9521,6 @@ class transp_output:
 
         ax.axhline(y=1.0, ls="--", c="k", lw=1)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -------------
 
@@ -9549,12 +9539,11 @@ class transp_output:
         ax.plot(self.x_lw, self.Chi_e_MITIM[i1, :], lw=1, c="c", label="$\\chi_e$ check")
         ax.set_ylabel("$\\chi$ ($m^2/s$)")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_xlim([0, maxx])
         GRAPHICStools.autoscale_y(ax)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -------------
 
@@ -9562,14 +9551,13 @@ class transp_output:
         ax.plot(self.x_lw, self.Deff_e[i1, :], lw=2, c="orange", label="$D_{eff,e}$")
 
         ax.set_ylabel("$D_{eff}$ ($m^2/s$)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_xlim([0, maxx])
         GRAPHICStools.autoscale_y(ax)
 
         ax.axhline(y=0.0, lw=2, c="k", ls="--")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -------------
 
@@ -9596,13 +9584,12 @@ class transp_output:
 
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$q_{e,i}$ ($MW/m^2$)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Check heat transport")
 
         ax.set_xlim([0, maxx])
         GRAPHICStools.autoscale_y(ax, bottomy=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -------------
 
@@ -9626,7 +9613,7 @@ class transp_output:
 
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$\\Gamma_e$ ($10^{20}/s/m^2$)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Check particle transport")
 
         ax.set_xlim([0, maxx])
@@ -9634,7 +9621,6 @@ class transp_output:
 
         ax.axhline(y=0.0, lw=2, c="k", ls="--")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # --------
         ax = ax3
@@ -9649,7 +9635,6 @@ class transp_output:
         ax.set_xlim([0, maxx])
         GRAPHICStools.autoscale_y(ax)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # GyroBohm unit
         ax = ax3.twinx()
@@ -9671,14 +9656,13 @@ class transp_output:
         ax.plot(self.x_lw, self.Chi_i_neo[i1, :], lw=1, c="c", label="$\\chi_{i,nc}$")
         ax.set_ylabel("$\\chi$ ($m^2/s$)")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_yscale("log")
 
         ax.set_xlim([0, maxx])
         GRAPHICStools.autoscale_y(ax)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -----------
 
@@ -9690,12 +9674,11 @@ class transp_output:
         ax.plot(self.x_lw, self.qi_neo[i1, :], lw=1, c="c", label="$q_{i,nc}$")
         ax.set_ylabel("$q_{e,i}$ ($MW/m^2$)")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_xlim([0, maxx])
         GRAPHICStools.autoscale_y(ax, bottomy=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotDerivatives(self, fig=None, time=None, rhos=[0.0], complete=True):
         if fig is None:
@@ -9771,7 +9754,6 @@ class transp_output:
         GRAPHICStools.autoscale_y(ax1)
         ax1.set_title("Temperature gradients")
 
-        GRAPHICStools.addDenseAxis(ax1)
 
         # ~~~
         g = self.aLne
@@ -9808,7 +9790,6 @@ class transp_output:
         GRAPHICStools.autoscale_y(ax2)
         ax2.set_title("Density gradients")
 
-        GRAPHICStools.addDenseAxis(ax2)
 
         # ~~~
         g = self.shat
@@ -9845,7 +9826,6 @@ class transp_output:
         GRAPHICStools.autoscale_y(ax3)
         ax3.set_title("Safety Factor gradients")
 
-        GRAPHICStools.addDenseAxis(ax3)
 
         # ~~~
         g = self.shat_Rice
@@ -9863,7 +9843,6 @@ class transp_output:
         GRAPHICStools.autoscale_y(ax4)
         ax4.set_title("$\\hat{s}$ metrics")
 
-        GRAPHICStools.addDenseAxis(ax4)
 
         ax = ax4.twinx()
         g = self.Ls_Rice
@@ -9902,7 +9881,6 @@ class transp_output:
         GRAPHICStools.autoscale_y(ax5)
         ax5.set_title("Flux definitions")
 
-        GRAPHICStools.addDenseAxis(ax5)
 
     def plotImp(
         self,
@@ -10015,7 +9993,6 @@ class transp_output:
                 )
                 ax.set_ylim(bottom=0)
 
-                GRAPHICStools.addDenseAxis(ax)
                 GRAPHICStools.addLegendApart(ax, ratio=0.9, withleg=True)
 
                 # Fraction
@@ -10052,7 +10029,6 @@ class transp_output:
                 )
                 ax.set_ylim(bottom=0)
 
-                GRAPHICStools.addDenseAxis(ax)
                 GRAPHICStools.addLegendApart(ax, ratio=0.9, withleg=False)
 
                 # Ave
@@ -10086,7 +10062,6 @@ class transp_output:
                     transform=ax.transAxes,
                 )
 
-                GRAPHICStools.addDenseAxis(ax)
                 GRAPHICStools.addLegendApart(ax, ratio=0.9, withleg=False)
 
         cont += 1
@@ -10109,11 +10084,10 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$n_Z$ ($10^{20}m^{-3}$)")
         ax.set_title("Total impurities")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax_z = ax.twinx()
         ax_z.plot(self.x_lw, self.Zeff[it, :], lw=2, c="b", label="$Z_{eff}$")
@@ -10172,14 +10146,12 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("$n_Z/n_e$")
 
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
 
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = axs[3 * cont + 2]
-        GRAPHICStools.addDenseAxis(ax)
 
         if self.fZ_avolAVE[it] > minPlot:
             ax.plot(self.x_lw, self.fZAVE_Z[it, :], lw=2, c="g", label="Average")
@@ -10207,7 +10179,7 @@ class transp_output:
                 verticalalignment="center",
                 transform=ax.transAxes,
             )
-            ax.legend(loc="best", prop={"size": self.mainLegendSize})
+            ax.legend(loc="best")
 
             ax.set_ylim([0, self.fZAVE_Z[it, 0] + 5])
 
@@ -10860,7 +10832,7 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("Prad ($MW/m^3$)")
         ax.set_title("Radiation per impurity")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylim(bottom=0)
 
         l2 = f"$P$ = {self.PradT[it]:.1f}MW"
@@ -10878,7 +10850,6 @@ class transp_output:
 
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax2
         ax.plot(self.x_lw, self.Prad[it, :], lw=3, label="$P_{rad}$")
@@ -10892,10 +10863,9 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("Prad ($MW/m^3$)")
         ax.set_title("Radiation per type")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax3
         ax.plot(self.t, self.PradT, lw=3, label="$P_{rad}$")
@@ -10909,10 +10879,9 @@ class transp_output:
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Prad (MW)")
         ax.set_title("Radiation per impurity")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.axvline(x=self.t[it], c="k", ls="--")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax4
         ax.plot(self.t, self.PradT, lw=3, label="$P_{rad}$")
@@ -10925,10 +10894,9 @@ class transp_output:
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Prad (MW)")
         ax.set_title("Radiation per type")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotStability(self, fig=None, time=None):
         if time is None:
@@ -10957,7 +10925,7 @@ class transp_output:
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("[]")
         ax.set_title("Current limits")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         for i in np.arange(1, 5, 1):
             ax.axhline(y=i, ls="--", c="k", lw=1)
@@ -10998,7 +10966,7 @@ class transp_output:
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("[]")
         ax.set_title("Density limits")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax = ax3
         ax.plot(self.x_lw, self.j[it], c="b", lw=2, label="$J$")
@@ -11021,7 +10989,6 @@ class transp_output:
                 fontsize=10,
             )
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax4
 
@@ -11045,7 +11012,6 @@ class transp_output:
                 fontsize=10,
             )
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotRotation(self, fig=None, time=None):
         if time is None:
@@ -11056,81 +11022,60 @@ class transp_output:
         if fig is None:
             fig = plt.figure()
 
-        grid = plt.GridSpec(2, 2, hspace=0.3, wspace=0.3)
+        grid = plt.GridSpec(2, 2, hspace=0.4, wspace=0.4)
 
         ax1 = fig.add_subplot(grid[0, 0])
         ax2 = fig.add_subplot(grid[1, 0])
         ax3 = fig.add_subplot(grid[0, 1])
         ax4 = fig.add_subplot(grid[1, 1])
 
+        _leg = {"loc": "best"}
+
         ax = ax1
         ax.plot(
             np.append(-np.flipud(self.x_lw), self.x_lw),
             np.append(np.flipud(self.Vtor_HF[it]), self.Vtor_LF[it]),
             lw=2,
-            label="Plasma toroidal rotation",
+            label="Plasma toroidal",
         )
         ax.plot(
             np.append(-np.flipud(self.x_lw), self.x_lw),
             np.append(np.flipud(self.VtorNC_HF[it]), self.VtorNC_LF[it]),
             lw=1,
-            label="NC toroidal rotation",
+            label="NC toroidal",
         )
         ax.plot(
             np.append(-np.flipud(self.x_lw), self.x_lw),
             np.append(np.flipud(self.VpolNC_HF[it]), self.VpolNC_LF[it]),
             lw=1,
-            label="NC poloidal rotation",
+            label="NC poloidal",
         )
 
-        ax.set_xlabel("$\\rho_N$ extended")
+        ax.set_xlabel(r"$\rho_N$ extended")
         ax.set_ylabel("km/s")
-        ax.set_title("Midplane HF to LF rotation speed")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.set_title("Midplane HF\u2192LF rotation speed")
+        ax.legend(**_leg)
         ax.set_xlim([-1, 1])
         ax.axvline(x=0.0, ls="--", c="k", lw=1)
 
-        GRAPHICStools.addDenseAxis(ax)
 
+        # Angular rotation panel — all curves in rad/s (TGLF w0 convention)
+        w0_factor = 2 * np.pi * 1e3  # kHz → rad/s
         ax = ax2
-        ax.plot(self.x_lw, self.VtorkHz[it], c="r", lw=3, label="$\\omega$")
-        ax.plot(self.x_lw, self.VtorkHz_nc[it], c="b", lw=2, label="$\\omega_{nc}$")
-        ax.plot(
-            self.x_lw, self.VtorkHz_data[it], c="g", lw=2, label="$\\omega_{INPUT}$"
-        )
-
-        ax.plot(
-            self.xb_lw,
-            self.VtorkHz_check[it],
-            lw=1,
-            ls="--",
-            c="m",
-            label="check ($dV_r/d\\psi$)",
-        )
-        ax.plot(
-            self.xb_lw,
-            self.VtorkHz_rot_check[it],
-            lw=1,
-            ls="--",
-            c="y",
-            label="check ($dV_{r,rot}/d\\psi$)",
-        )
-        ax.plot(
-            self.xb_lw,
-            self.VtorkHz_nc_check[it],
-            lw=1,
-            ls="--",
-            c="c",
-            label="check ($dV_{r,nc}/d\\psi$)",
-        )
-
-        ax.set_xlabel("$\\rho_N$")
-        ax.set_ylabel("kHz")
+        ax.plot(self.x_lw, self.VtorkHz[it] * w0_factor, c="r", lw=3, label=r"$\omega$ (TRANSP)")
+        ax.plot(self.x_lw, self.VtorkHz_nc[it] * w0_factor, c="b", lw=2, label=r"$\omega_{nc}$")
+        ax.plot(self.x_lw, self.VtorkHz_data[it] * w0_factor, c="g", lw=2, label=r"$\omega_{INPUT}$")
+        ax.plot(self.x_lw, self.TGLF_w0[it], c="k", lw=2, ls="--", label=r"$w_0$ (TGLF)")
+        ax.plot(self.xb_lw, self.VtorkHz_check[it] * w0_factor, lw=1, ls=":", c="m",
+                label=r"check ($-d\Phi/d\psi$)")
+        ax.plot(self.xb_lw, self.VtorkHz_nc_check[it] * w0_factor, lw=1, ls=":", c="c",
+                label=r"check nc")
+        ax.set_xlabel(r"$\rho_N$")
+        ax.set_ylabel(r"$w_0$ (rad/s)")
         ax.set_title("Angular rotation")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(**_leg)
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax3
         ax.plot(
@@ -11140,25 +11085,23 @@ class transp_output:
             label="Mach number",
         )
 
-        ax.set_xlabel("$\\rho_N$ extended")
+        ax.set_xlabel(r"$\rho_N$ extended")
         ax.set_ylabel("Mach number")
         ax.set_title("Mach number")
-        # ax.legend(loc='best',prop={'size':self.mainLegendSize})
+        ax.legend(**_leg)
         ax.set_xlim([-1, 1])
-        ax.set_ylim([0, 0.3])
+        ax.axvline(x=0.0, ls="--", c="k", lw=1)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax4
-        ax.plot(self.t, self.Mach_LF[:, 0], lw=2, label="Mach number")
+        ax.plot(self.t, self.Mach_LF[:, 0], lw=2, label="Central Mach ($\\rho=0$)")
+        ax.axvline(x=self.t[it], ls="--", c="m", lw=1)
 
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Mach number")
         ax.set_title("Central Mach number")
-        # ax.legend(loc='best',prop={'size':self.mainLegendSize})
-        ax.set_ylim([0, 0.3])
+        ax.legend(**_leg)
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotFundamental(self, fig=None, time=None):
         if time is None:
@@ -11188,11 +11131,10 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("Length (mm)")
         ax.set_title("Spatial Quantities (LF)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax2
         ax.plot(
@@ -11217,11 +11159,10 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("Frequency (GHz)")
         ax.set_title("Frequencies (LF)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax3
         ax.plot(self.x_lw, self.cs[it], lw=2, label="$c_s$")
@@ -11233,11 +11174,10 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("Speed (m/s)")
         ax.set_title("Speed (LF)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax4
         ax.plot(self.x_lw, self.nu_eff[it], lw=2, c="r", label="$\\nu_{eff}$")
@@ -11253,11 +11193,10 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("Collisionality")
         ax.set_title("Collisionalities")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # ax.set_ylim([0,1.5*np.max([self.nu_eff_avol[it],self.nu_star_avol[it],self.nu_norm_avol[it]])])
 
@@ -11283,7 +11222,6 @@ class transp_output:
 
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # axl = ax.twinx()
         # dif = np.abs(self.LambdaCoul_e[it]-self.LambdaCoul_e_TRANSP[it])/self.LambdaCoul_e_TRANSP[it]*100
@@ -11295,12 +11233,11 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("Coulomb Logarithm")
         ax.set_title("Collisions")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylim(bottom=0)
 
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotFast(self, fig=None, time=None, rhos=[0, 0.25, 0.5, 0.75, 0.95, 1.0]):
         if time is None:
@@ -11399,9 +11336,8 @@ class transp_output:
         ax.set_ylabel("W ($MJ/m^3$)")
         ax.set_title("Fast ion stored energy profiles")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # __________
         ax = fig.add_subplot(grid[1, 0])
@@ -11416,9 +11352,8 @@ class transp_output:
         ax.set_ylabel("p (MPa)")
         ax.set_title("Fast ion pressure profiles")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # _________________________________
         ax = fig.add_subplot(grid[0, 1], sharex=ax)
@@ -11440,10 +11375,9 @@ class transp_output:
         ax.set_ylim(bottom=0)
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("n ($10^{20}m^{-3}$)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Density Profiles")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # _________________________________
         ax = fig.add_subplot(grid[1, 1], sharex=ax)
@@ -11481,11 +11415,10 @@ class transp_output:
         ax.set_xlim([0, 1])
         ax.set_xlabel("$\\rho_N$")
         ax.set_ylabel("T (keV)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Effective Temperature Profiles")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # _________________________________
         ax = fig.add_subplot(grid[0, 2])
@@ -11503,11 +11436,10 @@ class transp_output:
 
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("p (MPa)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Pressure Traces")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # _________________________________
         ax = fig.add_subplot(grid[1, 2])
@@ -11544,12 +11476,11 @@ class transp_output:
         ax.set_title("Pressure Profiles (saw)")
         ax.set_ylim(bottom=0)
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         for i in rhos:
             ax.axvline(x=i, c="k", ls="--", lw=1)
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotFast2(self, fig=None, time=None):
         if time is None:
@@ -11579,8 +11510,8 @@ class transp_output:
         ax1.set_ylabel("$T_{mini}/T_e$")
         ax.set_title("Fast ion stabilization metrics")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
-        ax1.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
+        ax1.legend(loc="upper right")
 
         ax.axvline(x=self.x_lw[np.argmax(rat)], ls="--", c="m", lw=0.5)
         ax.axvline(
@@ -11592,7 +11523,6 @@ class transp_output:
 
         ax1.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # _________________________________
         ax0 = fig.add_subplot(grid[0, 1])
@@ -11611,8 +11541,8 @@ class transp_output:
         ax1.set_ylabel("$T_{mini}$")
         ax.set_title("Fast ion stabilization metrics")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
-        ax1.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
+        ax1.legend(loc="upper right")
 
         ax.axvline(x=self.x_lw[np.argmax(rat)], ls="--", c="m", lw=0.5)
         ax.axvline(
@@ -11625,7 +11555,6 @@ class transp_output:
         # ax1.axhline(y=0,ls='--',c='k',lw=0.5)
         ax1.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotParticleBalance(self, fig=None, time=None):
         if time is None:
@@ -11663,7 +11592,7 @@ class transp_output:
         ax.set_title("Electron Particle Balance")
         ax.set_ylabel("$10^{20}m^{-3}/s$")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
         ax.set_xlim([0, 0.95])
 
         ir = np.argmin(np.abs(0.95 - self.x_lw))
@@ -11688,7 +11617,6 @@ class transp_output:
         ax.set_ylim([min_Se, max_Se])
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Electron Source
         ax = ax2
@@ -11703,12 +11631,11 @@ class transp_output:
         ax.set_title("Electron Sources")
         ax.set_ylabel("$10^{20}m^{-3}/s$")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_ylim([min_Se, max_Se])
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Electron wall Source
         ax = ax3
@@ -11778,12 +11705,11 @@ class transp_output:
         ax.set_title("Electron Sources (division 2)")
         ax.set_ylabel("$10^{20}m^{-3}/s$")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_ylim([min_Se, max_Se])
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # DT sources
         ax = ax4
@@ -11844,12 +11770,11 @@ class transp_output:
         ax.set_title("DT Sources")
         ax.set_ylabel("$10^{20}m^{-3}/s$")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         ax.set_ylim([min_Se, max_Se])
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotIonsBalance(self, time=None, fig=None, label=""):
         if time is None:
@@ -11884,11 +11809,10 @@ class transp_output:
         ax.set_title("Deuterium Balance")
         ax.set_ylabel("$10^{20}m^{-3}/s$")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
         ax.set_xlim([0, 0.95])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # ax1 = ax.twinx()
         # ax1.plot(self.x_lw,self.nD[it,:],lw=5,alpha=0.2,c='k',label='$n_D$')
@@ -11915,11 +11839,10 @@ class transp_output:
         ax.set_title("Tritium Balance")
         ax.set_ylabel("$10^{20}m^{-3}/s$")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
         ax.set_xlim([0, 0.95])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # ax1 = ax.twinx()
         # ax1.plot(self.x_lw,self.nT[it,:],lw=5,alpha=0.2,c='k',label='$n_T$')
@@ -11949,11 +11872,10 @@ class transp_output:
         ax.set_title("He4 ash Balance")
         ax.set_ylabel("$10^{20}m^{-3}/s$")
         ax.set_xlabel("$\\rho_N$")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
         ax.set_xlim([0, 0.95])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # ax1 = ax.twinx()
         # ax1.plot(self.x_lw,self.nHe4[it,:],lw=5,alpha=0.2,c='k',label='$n_{He4}$')
@@ -11969,7 +11891,6 @@ class transp_output:
         ax.set_ylabel("Total particles in plasma $10^{20}$")
         ax.set_xlabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = ax.twinx()
         ax1.plot(self.t, self.LD, lw=2, alpha=0.5, c="k")
@@ -11982,7 +11903,6 @@ class transp_output:
         ax.set_ylabel("Total particles in plasma $10^{20}$")
         ax.set_xlabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = ax.twinx()
         ax1.plot(self.t, self.LT, lw=2, alpha=0.5, c="k")
@@ -11995,7 +11915,6 @@ class transp_output:
         ax.set_ylabel("Total particles in plasma $10^{20}$")
         ax.set_xlabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = ax.twinx()
         ax1.plot(self.t, self.LHe4, lw=2, alpha=0.5, c="k")
@@ -12011,7 +11930,6 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.legend()
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Tritium
         ax = fig.add_subplot(grid[2, 1])
@@ -12021,7 +11939,6 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.legend()
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Tritium
         ax = fig.add_subplot(grid[2, 2])
@@ -12036,7 +11953,6 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.legend()
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotGS(self, time=None, fig=None, label=""):
         if time is None:
@@ -12075,7 +11991,6 @@ class transp_output:
         ax.legend(loc="upper center")
         ax.set_ylim([0, np.max(self.q[it])])
         ax.set_xlim([0, 1])
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = ax.twinx()
         ax1.plot(x0, np.abs(y0 - y1) / y0 * 100.0, c="r", lw=1, ls="--")
@@ -12102,7 +12017,6 @@ class transp_output:
         ax.legend(loc="upper center")
         ax.set_ylim([self.Ip[it] * 0.5, self.Ip[it] * 1.5])
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = ax.twinx()
         ax1.plot(
@@ -12130,7 +12044,6 @@ class transp_output:
         ax.legend(loc="upper center")
         ax.set_ylim([0, np.max(self.phi[it])])
         ax.set_xlim([0, 1])
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = ax.twinx()
         ax1.plot(x0, np.abs(y0 - y1) / y0 * 100.0, c="r", lw=2, ls="--")
@@ -12155,7 +12068,6 @@ class transp_output:
         ax.legend(loc="upper center")
         ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = ax.twinx()
         ax1.plot(x0, np.abs(y0 - y1) / y0 * 100.0, c="r", lw=1, ls="--")
@@ -12170,16 +12082,15 @@ class transp_output:
         ax.ticklabel_format(axis="y", useMathText=True)
         ax.axhline(y=0.03, c="b", ls="--", lw=1, label="$GS_{error}$ max")
         ax.set_ylabel("GS Error")
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
         ax.set_xlabel("Time (s)")
         ax.set_ylim([0, 0.04])
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = ax.twinx()
         ax1.plot(self.t, self.TEQ_error, c="r", lw=1, label="$TEQ_{resid}$")
         ax1.axhline(y=1e-6, c="r", ls="--", lw=1, label="$TEQ_{resid}$ goal")
         ax1.set_ylabel("TEQ residue")
-        ax1.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax1.legend(loc="upper right")
         mm = 1e-6  # np.max(self.TEQ_error)
         ax1.set_ylim([0, mm * 1.5])
 
@@ -12206,7 +12117,6 @@ class transp_output:
         ax.set_ylabel("")
         ax.set_xlabel("$\\psi_n$")
         ax.legend(loc="upper center")
-        GRAPHICStools.addDenseAxis(ax)
 
         ax1 = ax.twinx()
         ax1.plot(x0, np.abs(y2 - y0) / y0 * 100.0, c="r", lw=2, ls="--")
@@ -12249,13 +12159,12 @@ class transp_output:
 
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("$q_{95}$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_title("Evaluations of $q_{95}$")
 
         lastval = self.q95[self.ind_saw]
         ax.set_ylim([lastval - 0.5, lastval + 0.5])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -----------
         axa = fig.add_subplot(grid[1, 3])
@@ -12266,12 +12175,11 @@ class transp_output:
         )
 
         ax.set_xlim([0, 1])
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.axhline(y=0, ls="--", lw=0.5)
         ax.set_ylabel("$p'$ (Pa/(Wb/rad)), $FF'$ $(T*m)^2/(Wb/rad)$")
         ax.set_xlabel("$\\psi_n$")
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotGEO(self, time=None, fig=None, label=""):
         if time is None:
@@ -12340,7 +12248,7 @@ class transp_output:
             [(self.Ymag[it] - self.b[it]) * 1.2, (self.Ymag[it] + self.b[it]) * 1.2]
         )
 
-        ax.legend(loc="lower left", fontsize=8)
+        ax.legend(loc="lower left")
         # ax.set_aspect('equal')
 
         ax = ax1
@@ -12377,8 +12285,7 @@ class transp_output:
             )
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Elongation")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
-        GRAPHICStools.addDenseAxis(ax)
+        ax.legend(loc="best")
 
         ax = ax2
         ax.plot(self.t, self.delta, c="b", lw=2, ls="-", label="$\\delta_{TRANSP,sep}$")
@@ -12407,8 +12314,7 @@ class transp_output:
             )
         ax.set_xlabel("Time (s)")
         ax.set_ylabel("Triangularity")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
-        GRAPHICStools.addDenseAxis(ax)
+        ax.legend(loc="best")
 
         ax = ax3
         ax.plot(self.x_lw, self.dvol[it], "-o", c="b", lw=1, markersize=3)
@@ -12418,7 +12324,6 @@ class transp_output:
         ax.set_ylabel("Zone volume ($m^{3}$)")
         ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax4
         ax.plot(self.xb_lw, self.S_x[it], "-o", c="b", lw=1, markersize=3)
@@ -12428,7 +12333,6 @@ class transp_output:
         ax.set_ylabel("Surface area ($m^{2}$)")
         ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotNuclear(self, time=None, fig=None, label=""):
         if time is None:
@@ -12449,9 +12353,8 @@ class transp_output:
         ax.set_title("Plasma Store")
         ax.set_ylabel("Total content ($mg$)")
         ax.set_xlabel("Time (s)")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -----------
         ax = fig.add_subplot(grid[0, 1])
@@ -12500,10 +12403,9 @@ class transp_output:
         ax.set_title("Neutron rate")
         ax.set_ylabel("Neutron rate ($/s$)")
         ax.set_xlabel("Time (s)")
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -----------
         ax = fig.add_subplot(grid[1, 0])
@@ -12520,9 +12422,8 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -----------
         ax = fig.add_subplot(grid[1, 1])
@@ -12556,9 +12457,8 @@ class transp_output:
         ax.set_ylabel("Neutron rate ($10^{20}/s$)")
         ax.set_xlabel("$\\rho_N$")
         ax.set_xlim([0, 1])
-        ax.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper right")
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotDivertor(self, time=None, fig=None, label=""):
         if time is None:
@@ -12578,10 +12478,9 @@ class transp_output:
         ax.set_title("Power to the LCFS")
         ax.set_ylabel("Power ($MW$)")
         ax.set_xlabel("Time (s)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylim(bottom=0.0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -----------
         ax = fig.add_subplot(grid[1, 0])
@@ -12590,10 +12489,9 @@ class transp_output:
         ax.set_title("Accumulated Energy ($MJ$)")
         ax.set_ylabel("Energy ($MJ$)")
         ax.set_xlabel("Time (s)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylim(bottom=0.0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -----------
         ax = fig.add_subplot(grid[0, 1])
@@ -12605,10 +12503,9 @@ class transp_output:
         ax.set_title("$\\lambda_q$")
         ax.set_ylabel("$\\lambda_q$ (mm)")
         ax.set_xlabel("Time (s)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylim(bottom=0.0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # -----------
         ax = fig.add_subplot(grid[1, 1])
@@ -12627,10 +12524,9 @@ class transp_output:
         ax.set_title("Upstream Temperatures")
         ax.set_ylabel("$T_{upstream}$ (keV)")
         ax.set_xlabel("Time (s)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylim(bottom=0.0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotSlowDown(self, fig=None, time=None):
         if time is None:
@@ -12664,7 +12560,6 @@ class transp_output:
         ax.set_ylim(bottom=0)
         ax.legend()
 
-        GRAPHICStools.addDenseAxis(ax)
 
         #
         ax = fig.add_subplot(grid[0, 1])
@@ -12677,7 +12572,6 @@ class transp_output:
         ax.legend()
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = fig.add_subplot(grid[1, 0])
         i1, i2 = prepareTimingsSaw(time, self)
@@ -12708,7 +12602,6 @@ class transp_output:
         ax.legend()
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         #
         ax = fig.add_subplot(grid[1, 1])
@@ -12731,11 +12624,10 @@ class transp_output:
         ax.set_title("Volume average density and concentration")
         ax.set_ylabel("$10^{20}/m^3$")
         ax.set_xlabel("Time (s)")
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
         maxy = np.max([np.max(self.nfusHe4_avol), np.max(self.nHe4_avol)])
         ax.set_ylim([0, maxy * 1.2])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = ax.twinx()
         ax.plot(
@@ -12785,11 +12677,9 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_xlim([0, 1])
         ax.set_ylim(bottom=0)
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
-        ax1.legend(loc="upper right", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
+        ax1.legend(loc="upper right")
 
-        GRAPHICStools.addDenseAxis(ax)
-        GRAPHICStools.addDenseAxis(ax1)
 
         ax = fig.add_subplot(grid[0, 1])
         ax.plot(self.x_lw, self.Jr_anom[it] * 1e6, lw=2, c="r")
@@ -12799,7 +12689,6 @@ class transp_output:
         ax.set_xlabel("$\\rho_N$")
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = fig.add_subplot(grid[1, 0])
         ax.plot(self.t, self.Pf_loss_orbit_He4, lw=2, label="$P_{loss,orbit}$", c="r")
@@ -12809,8 +12698,7 @@ class transp_output:
         ax.set_ylabel("$MW$")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
-        GRAPHICStools.addDenseAxis(ax)
+        ax.legend(loc="upper left")
 
         ax = fig.add_subplot(grid[1, 1])
         ax.plot(self.t, self.Gf_loss_orbit_He4, lw=2, label="$S_{loss,orbit}$", c="r")
@@ -12827,9 +12715,8 @@ class transp_output:
         ax.set_ylabel("$10^{20}n/s$")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
-        ax.legend(loc="upper left", prop={"size": self.mainLegendSize})
+        ax.legend(loc="upper left")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # self.Pf_loss_orbit 		= self.f['BPLIM'] * 1E-6 # in MW
         # #self.Pf_loss_orbitPrompt 	= self.Pf_loss_orbit * self.f['BSORBPR'][:]
@@ -12931,7 +12818,6 @@ class transp_output:
         ax.set_title("Neutral Density")
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = fig.add_subplot(grid[1, 0])
 
@@ -12969,7 +12855,6 @@ class transp_output:
         ax.set_title("Neutral Temperature")
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
         # Sources
 
@@ -13035,7 +12920,6 @@ class transp_output:
         ax.set_title("Neutral Pressure")
         ax.set_xlim([0, 1])
 
-        GRAPHICStools.addDenseAxis(ax)
 
     def plotPerformance(self, fig=None, time=None):
         if time is None:
@@ -13053,7 +12937,7 @@ class transp_output:
         ax = fig.add_subplot(grid[0, 0])
         ax.plot(self.t, self.Q, lw=2, label="$Q_{plasma}$")
         ax.plot(self.t, self.Q_corrected_dWdt, lw=0.2, label="$Q_{plasma,-dWdt}$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         if self.Q[-1] > 0.1:
             ax.axhline(y=1.0, c="k", ls="--")
@@ -13111,7 +12995,6 @@ class transp_output:
         ax.set_ylabel("$Q$")
         ax.set_xlabel("Time (s)")
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = fig.add_subplot(grid[1, 0], sharex=ax)
         ax.plot(self.t, self.Pout, lw=2, label="$P_{out}$")
@@ -13127,12 +13010,11 @@ class transp_output:
                 verticalalignment="center",
             )  # , transform=ax.transAxes)
         ax.plot(self.t, self.utilsiliarPower, lw=3, label="$P_{in}$")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylabel("$P$ (MW)")
         ax.set_xlabel("Time (s)")
         ax.set_ylim(bottom=0)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = fig.add_subplot(grid[0, 1], sharex=ax)
         ax.plot(self.t, self.H98y2_check, lw=2, c="r", label="$H_{98,y2}$")
@@ -13167,7 +13049,7 @@ class transp_output:
             extra=0.05,
         )
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylabel("$H$")
         ax.set_xlabel("Time (s)")
         try:
@@ -13177,7 +13059,6 @@ class transp_output:
 
         GRAPHICStools.addLegendApart(ax, ratio=0.7, withleg=True)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         ax = fig.add_subplot(grid[1, 1], sharex=ax)
         ax.plot(self.t, self.taue * 1e-3, lw=2, c="b", label="$\\tau_E$")
@@ -13221,20 +13102,19 @@ class transp_output:
         if self.taup_He4[-1] > 0.0:
             ax.plot(self.t, self.taup_He4 * 1e-3, lw=2, c="c", label="$\\tau_{p,He4}$")
 
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
         ax.set_ylabel("Confinement time (s)")
         ax.set_xlabel("Time (s)")
         ax.set_ylim([0, 1])
 
         GRAPHICStools.addLegendApart(ax, ratio=0.7, withleg=True, extraPad=0.2)
 
-        GRAPHICStools.addDenseAxis(ax)
 
         axs = ax.twinx()
         ax = axs
         ax.plot(self.t, self.nTtau, lw=2, c="c", label="$n_{i,0}T_{i,0}\\tau_E$")
         ax.set_ylabel("$n_{i,0}T_{i,0}\\tau_E$ ($10^{21}keVm^{-3}s$)")
-        ax.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax.legend(loc="best")
 
         GRAPHICStools.addLegendApart(ax, ratio=0.7, withleg=False)
 
@@ -14280,7 +14160,7 @@ class transp_output:
         )
 
         if leg:
-            ax1.legend(loc="best", prop={"size": self.mainLegendSize})
+            ax1.legend(loc="best")
             # ax2.legend(loc='best',prop={'size':self.mainLegendSize})
             ax1.set_title("Electrons")
             ax2.set_title("Ions")
@@ -14319,7 +14199,7 @@ class transp_output:
 
         ax3.set_title("Ratios")
         ax3.set_xlabel("$\\rho_N$")
-        ax3.legend(loc="best", prop={"size": self.mainLegendSize})
+        ax3.legend(loc="best")
         ax3.set_ylim([0, (TGLFstd_Qi / z).max() * 2.0])
         ax3.axhline(y=1.0, ls="--", c="k", lw=1)
 
@@ -14472,7 +14352,7 @@ class transp_output:
             # ax2.set_yscale('symlog',thr=1E-1)
 
             if i == 0:
-                ax1.legend(loc="best", prop={"size": self.mainLegendSize})
+                ax1.legend(loc="best")
 
             ax2.set_ylabel("Frequency")
 
@@ -14632,7 +14512,7 @@ class transp_output:
             # ax2.set_yscale('symlog',thr=1E-1)
 
             if i == 0:
-                ax1.legend(loc="best", prop={"size": self.mainLegendSize})
+                ax1.legend(loc="best")
 
             ax2.set_yscale("linear")
             ax2.set_ylim(bottom=0)
@@ -14728,7 +14608,7 @@ class transp_output:
                 ls="-.",
                 lw=2,
             )
-            colors = GRAPHICStools.listColors()
+            colors = get_colors()
             for i in range(len(rhos)):
                 ax.scatter(
                     [self.Creely_ChiPert],
@@ -14743,7 +14623,7 @@ class transp_output:
             ax.set_ylabel("$\\chi_e^{pert}$ TGLF ($m^2/s$)")
             ax.set_xlim([0, maxx * 1.2])
             ax.set_ylim([0, maxx * 1.2])
-            ax.legend(loc="best", fontsize=10)
+            ax.legend(loc="best")
 
             ax = ax10
 
@@ -14777,7 +14657,7 @@ class transp_output:
             ax.set_ylabel("$\\chi_e^{pert}$ TGLF ($m^2/s$)")
             ax.set_xlim([0, maxx * 1.2])
             ax.set_ylim([0, maxx * 1.2])
-            ax.legend(loc="best", fontsize=10)
+            ax.legend(loc="best")
 
             # Plot pulse analysis details
             self.plotPulse(fig=fig2, time=time, rhoRange=rhoRange)
@@ -15028,25 +14908,26 @@ class transp_output:
             pass
 
         if NML is not None:
-            print("\t- Looking for information on beam trajectories")
-            try:
-                self.beam_trajectories = getBeamTrajectories(namelist)
-                print("\t\t- Gathered beam trajectories from namelist post-processing")
-            except:
-                pass
+            
+            if np.sum(self.PnbiT) > 1E-10:
+                print("\t- Looking for information on beam trajectories")
+                try:
+                    self.beam_trajectories = getBeamTrajectories(str(namelist), nbeams=self.nbeams)
+                    print("\t\t- Gathered beam trajectories from namelist post-processing")
+                except:
+                    print("\t\t- Could not gather beam trajectories from namelist post-processing")
 
-            print("\t- Looking for information on ECH trajectories")
-            try:
-                self.ECRH_trajectories = getECRHTrajectories(
-                    namelist,
-                    self.Theta_gyr[:, self.ind_saw],
-                    self.Phi_gyr[:, self.ind_saw],
-                )
-                print(
-                    "\t\t- Gathered ECRH trajectories from namelist and CDF post-processing"
-                )
-            except:
-                pass
+            if np.sum(self.PechT) > 1E-10:
+                print("\t- Looking for information on ECH trajectories")
+                try:
+                    self.ECRH_trajectories = getECRHTrajectories(
+                        namelist,
+                        self.Theta_gyr[:, self.ind_saw],
+                        self.Phi_gyr[:, self.ind_saw],
+                    )
+                    print("\t\t- Gathered ECRH trajectories from namelist and CDF post-processing")
+                except:
+                    print("\t\t- Could not gather ECRH trajectories from namelist and CDF post-processing")
 
     def getEstimatedMachineCost(self):
         self.cost = 0.7266 * self.Bt**2 * self.Rmajor**3 + self.PichT
@@ -15274,7 +15155,7 @@ class transp_output:
 
         return transp
 
-    def to_profiles(self, time_extraction = None):
+    def to_profiles(self, time_extraction=None, time_window=0.0):
 
         if time_extraction is None:
             time_extraction = self.t[self.ind_saw]
@@ -15282,12 +15163,35 @@ class transp_output:
             time_extraction = self.t[-1] + time_extraction
 
         it = np.argmin(np.abs(self.t - time_extraction))
-        
-        print(f"\t- Converting to input.gacode class, extracting at t={time_extraction:.3f}s")
-        print("\t\t* TRANSP to profiles: Ignoring rotation and no-ICRF auxiliary sources",typeMsg='w')
-        print(f"\t\t* TRANSP to profiles: Not time averaging yet, just extracting at t={time_extraction:.3f}s",typeMsg='w')
-        print("\t\t* Extrapolating using cubic spline",typeMsg='i')
-        
+
+        # Time indices to average over (single point when time_window == 0)
+        if time_window == 0.0:
+            it_range = np.array([it])
+        else:
+            mask = np.abs(self.t - time_extraction) <= time_window / 2
+            it_range = np.where(mask)[0]
+            if len(it_range) == 0:
+                it_range = np.array([it])
+
+        if time_window == 0.0:
+            print(f"\t- Converting to input.gacode class, extracting at t={time_extraction:.3f}s")
+            print(f"\t\t* Kinetic profiles, power, rotation, torque, and equilibrium: single slice at t={self.t[it]:.3f}s", typeMsg='i')
+            print(f"\t\t* Flux surfaces: evaluated at t={self.t[it]:.3f}s", typeMsg='i')
+        else:
+            t_lo, t_hi = self.t[it_range[0]], self.t[it_range[-1]]
+            t_mean = float(np.mean(self.t[it_range]))
+            print(f"\t- Converting to input.gacode class, time-averaging over t=[{t_lo:.3f}, {t_hi:.3f}]s ({len(it_range)} slices)")
+            print(f"\t\t* Kinetic profiles, power, rotation, torque, and equilibrium: averaged over {len(it_range)} slices", typeMsg='i')
+            print(f"\t\t* Flux surfaces: evaluated at mean time t={t_mean:.3f}s", typeMsg='i')
+        print("\t\t* Extrapolating using cubic spline", typeMsg='i')
+
+        # Helpers: average a scalar (time,) or profile (time, x) over it_range
+        def _s(arr):
+            return float(np.mean(arr[it_range]))
+
+        def _p(arr):
+            return np.mean(arr[it_range, :], axis=0)
+
         #TODO: I should be looking at the extrapolated quantities in TRANSP?
         from mitim_tools.misc_tools.MATHtools import extrapolateCubicSpline as extrapolation_routine
 
@@ -15297,8 +15201,8 @@ class transp_output:
 
         profiles = {}
 
-        # Radial grid
-        rho_grid = self.xb[it]
+        # Radial grid — averaged over time window
+        rho_grid = np.mean(self.xb[it_range, :], axis=0)
 
         # Info
         nion = len(self.Species) - 1
@@ -15326,7 +15230,7 @@ class transp_output:
             else:
                 profiles['name'].append(self.Species[specie]['name'])
                 profiles['mass'].append(self.Species[specie]['m']/self.mD * mass_ref)
-                profiles['z'].append(self.Species[specie]['Z'][it])
+                profiles['z'].append(_s(self.Species[specie]['Z']))
                 if self.Species[specie]['type'] == 'thermal':
                     profiles['type'].append('[therm]')
                 else:
@@ -15339,32 +15243,33 @@ class transp_output:
         profiles['z'] = np.array(profiles['z'])
 
         # -------------------------------------------------------------------------------------------------------
-        # Global equilibrium
+        # Global equilibrium  (scalars — averaged)
         # -------------------------------------------------------------------------------------------------------
 
-        profiles['torfluxa(Wb/radian)'] = np.array([self.phi_bnd[it] / (2*np.pi)])
-        profiles['rcentr(m)'] = np.array([self.Rmajor[it]])
-        profiles['bcentr(T)'] = np.array([self.Bt_vacuum[it]])
-        profiles['current(MA)'] = np.array([self.Ip[it]])
+        profiles['torfluxa(Wb/radian)'] = np.array([_s(self.phi_bnd) / (2*np.pi)])
+        profiles['rcentr(m)'] = np.array([_s(self.Rmajor)])
+        profiles['bcentr(T)'] = np.array([_s(self.Bt_vacuum)])
+        profiles['current(MA)'] = np.array([_s(self.Ip)])
 
         # -------------------------------------------------------------------------------------------------------
-        # Equilibrium profiles
+        # Equilibrium profiles  (time-averaged)
         # -------------------------------------------------------------------------------------------------------
 
         profiles['rho(-)'] = rho_grid
 
-        profiles['polflux(Wb/radian)'] = self.psi[it,:]
-        profiles['q(-)'] = self.q[it,:]
-        
+        profiles['polflux(Wb/radian)'] = _p(self.psi)
+        profiles['q(-)'] = _p(self.q)
+
         # -------------------------------------------------------------------------------------------------------
-        # Flux surfaces
+        # Flux surfaces  (R,Z averaged over time window, then MXH fitted once)
         # -------------------------------------------------------------------------------------------------------
 
         coeffs_MXH = 7
 
+        t_mean = float(np.mean(self.t[it_range]))
         Rs, Zs = [], []
         for rho in profiles['rho(-)']:
-            R, Z = getFluxSurface(self.f, time_extraction, rho, rhoPol=False, sqrt=True)
+            R, Z = getFluxSurface(self.f, t_mean, rho, rhoPol=False, sqrt=True)
             Rs.append(R)
             Zs.append(Z)
         Rs = np.array(Rs)
@@ -15378,7 +15283,7 @@ class transp_output:
             profiles[f'shape_cos{i}(-)'] = surfaces.cn[:,i]
             if i > 2:
                 profiles[f'shape_sin{i}(-)'] = surfaces.sn[:,i]
-        
+
         profiles['kappa(-)'] = surfaces.kappa
         profiles['delta(-)'] = np.sin(surfaces.sn[:,1])
         profiles['zeta(-)'] = -surfaces.sn[:,2]
@@ -15387,45 +15292,54 @@ class transp_output:
         profiles['zmag(m)'] = surfaces.Z0
 
         # -------------------------------------------------------------------------------------------------------
-        # Kinetic profiles
+        # Kinetic profiles  (time-averaged)
+        # -------------------------------------------------------------------------------------------------------
         # -------------------------------------------------------------------------------------------------------
 
         profiles['ni(10^19/m^3)'] = []
         profiles['ti(keV)'] = []
         for specie in self.Species:
             if specie == 'e':
-                profiles['te(keV)'] = self.Te[it,:]
-                profiles['ne(10^19/m^3)'] =self.ne[it,:]*1E1
+                profiles['te(keV)'] = _p(self.Te)
+                profiles['ne(10^19/m^3)'] = _p(self.ne) * 1E1
             else:
-                profiles['ni(10^19/m^3)'].append(self.Species[specie]['n'][it,:]*1E1)
-                profiles['ti(keV)'].append(self.Species[specie]['T'][it,:])
+                profiles['ni(10^19/m^3)'].append(_p(self.Species[specie]['n']) * 1E1)
+                profiles['ti(keV)'].append(_p(self.Species[specie]['T']))
         profiles['ni(10^19/m^3)'] = np.array(profiles['ni(10^19/m^3)']).T
         profiles['ti(keV)'] = np.array(profiles['ti(keV)']).T
 
-        # Power profiles
-        profiles['qei(MW/m^3)'] = self.Pei[it,:]
-        profiles['qrfe(MW/m^3)'] = self.Peich[it,:]
-        profiles['qrfi(MW/m^3)'] = self.Piich[it,:]
-        profiles['qbrem(MW/m^3)'] = self.Prad_b[it,:]
-        profiles['qsync(MW/m^3)'] = self.Prad_c[it,:]
-        profiles['qline(MW/m^3)'] = self.Prad_l[it,:]
-        profiles['qohme(MW/m^3)'] = self.Poh[it,:]
-        profiles['qfuse(MW/m^3)'] = self.Pfuse[it,:]
-        profiles['qfusi(MW/m^3)'] = self.Pfusi[it,:]
+        # Power profiles  (time-averaged)
+        profiles['qei(MW/m^3)'] = _p(self.Pei)
+        profiles['qrfe(MW/m^3)'] = _p(self.Peich)
+        profiles['qrfi(MW/m^3)'] = _p(self.Piich)
+        profiles['qbrem(MW/m^3)'] = _p(self.Prad_b)
+        profiles['qsync(MW/m^3)'] = _p(self.Prad_c)
+        profiles['qline(MW/m^3)'] = _p(self.Prad_l)
+        profiles['qohme(MW/m^3)'] = _p(self.Poh)
+        profiles['qfuse(MW/m^3)'] = _p(self.Pfuse)
+        profiles['qfusi(MW/m^3)'] = _p(self.Pfusi)
+        profiles['qbeame(MW/m^3)'] = _p(self.Pnbie)
+        profiles['qbeami(MW/m^3)'] = _p(self.Pnbii)
+
+        # Rotation  (time-averaged)
+        profiles['w0(rad/s)'] = _p(self.TGLF_w0)
+
+        # Torque — full NBI momentum source: collisional + JxB + thermalization  (time-averaged)
+        profiles['qmom(N/m^2)'] = _p(self.Pnbit_coll) + _p(self.Pnbit_jxb) + _p(self.Pnbit_therm)
 
         # -------------------------------------------------------------------------------------------------------
-        # Postprocessing: Interpolate from xb to x (boundary to center quantities)
+        # Postprocessing: Interpolate from x to xb (zone centres to boundary grid)
         # -------------------------------------------------------------------------------------------------------
 
-        def grid_interpolation_method_to_one(x,y,x_new):
+        def grid_interpolation_method_to_one(x, y, x_new):
             return extrapolation_routine(x_new, x, y)
 
-        keys_in_x = ['te(keV)', 'ne(10^19/m^3)', 'ni(10^19/m^3)', 'ti(keV)', 'qei(MW/m^3)', 'qrfe(MW/m^3)', 'qrfi(MW/m^3)', 'qbrem(MW/m^3)', 'qsync(MW/m^3)', 'qline(MW/m^3)', 'qohme(MW/m^3)', 'qfuse(MW/m^3)', 'qfusi(MW/m^3)']
+        keys_in_x = ['te(keV)', 'ne(10^19/m^3)', 'ni(10^19/m^3)', 'ti(keV)', 'qei(MW/m^3)', 'qrfe(MW/m^3)', 'qrfi(MW/m^3)', 'qbrem(MW/m^3)', 'qsync(MW/m^3)', 'qline(MW/m^3)', 'qohme(MW/m^3)', 'qfuse(MW/m^3)', 'qfusi(MW/m^3)', 'qbeame(MW/m^3)', 'qbeami(MW/m^3)', 'w0(rad/s)', 'qmom(N/m^2)']
         for key in keys_in_x:
             if (profiles[key].ndim == 1):
-                profiles[key] = grid_interpolation_method_to_one(self.x[it], profiles[key],profiles['rho(-)'])
+                profiles[key] = grid_interpolation_method_to_one(self.x[it], profiles[key], profiles['rho(-)'])
             elif (profiles[key].ndim == 2):
-                profiles[key] = np.vstack([grid_interpolation_method_to_one(self.x[it], profiles[key][:,i],profiles['rho(-)']) for i in range(profiles[key].shape[1])]).T
+                profiles[key] = np.vstack([grid_interpolation_method_to_one(self.x[it], profiles[key][:,i], profiles['rho(-)']) for i in range(profiles[key].shape[1])]).T
 
         # -------------------------------------------------------------------------------------------------------
         # Postprocessing: Add zero at the beginning
@@ -16565,27 +16479,105 @@ def definePenalties(q95, fG, kappa, BetaN, maxKappa=1.8):
     return np.max([penalty_q95 * penalty_fG * penalty_kappa * penalty_beta, 0.0])
 
 
-def getBeamTrajectories(namelist):
-    try:
-        from trgui_fbm import plot_aug
-    except ImportError:
-        print(
-            "\t- TRANSP tools external modules are not available. Please ensure it is installed and accessible.",
-            typeMsg="i",
+def getBeamTrajectories(namelist, nbeams=8, R_clip_cm=250.0):
+    """
+    Compute NBI beam centerline trajectories analytically from a TRANSP TR.DAT namelist.
+
+    Geometry (mid-plane approximation, Z = 0):
+      - Source radius:  R_src = sqrt(RTCENA^2 + XLBTNA^2)
+      - Source position: (R_src * cos(XBZETA), R_src * sin(XBZETA))
+      - Tangent point:   phi_tan = XBZETA ± arccos(RTCENA / R_src)
+                         co-injection (+, CCW), counter-injection (-, CW)
+
+    Parameters
+    ----------
+    namelist : str
+        Path to the TRANSP TR.DAT namelist file.
+    nbeams : int
+        Total number of beam sources (NBEAM).
+    R_clip_cm : float
+        Trajectory clipping radius in cm (≈ outer vessel wall, default 250 cm).
+
+    Returns
+    -------
+    dict with keys "xlin", "ylin", "rlin", "zlin" — each a list of length nbeams
+    containing arrays of coordinates in **meters**.
+    """
+    import re
+    from pathlib import Path
+
+    nml_str = Path(namelist).read_text()
+
+    def _float(name, idx):
+        m = re.search(
+            rf'^\s*{name}\s*\(\s*{idx}\s*\)\s*=\s*([\-+]?[\d.]+(?:[eE][\-+]?\d+)?)',
+            nml_str, re.M | re.I
         )
+        return float(m.group(1)) if m else None
 
-    xlin, ylin, rlin, zlin = plot_aug.nbi_plot(
-        nbis=[1, 2, 3, 4, 5, 6, 7, 8], runid=namelist[:-6]
-    )
+    def _bool(name, idx):
+        m = re.search(
+            rf'^\s*{name}\s*\(\s*{idx}\s*\)\s*=\s*(\S+)',
+            nml_str, re.M | re.I
+        )
+        if m:
+            return m.group(1).upper().strip('.') in ('TRUE', 'T')
+        return True   # default: co-injection
 
-    beam_trajectories = {
-        "xlin": np.array(xlin) * 1e-2,
-        "ylin": np.array(ylin) * 1e-2,
-        "rlin": np.array(rlin) * 1e-2,
-        "zlin": np.array(zlin) * 1e-2,
-    }
+    xlin, ylin, rlin, zlin = [], [], [], []
 
-    return beam_trajectories
+    for i in range(1, nbeams + 1):
+        rtcena = _float('RTCENA', i)   # tangency radius (cm)
+        xbzeta = _float('XBZETA', i)   # toroidal angle of beam port (deg)
+        xlbtna = _float('XLBTNA', i)   # source-to-tangent-point distance (cm)
+        nlco   = _bool('NLCO', i)      # True = co-injection (CCW)
+
+        if any(v is None for v in [rtcena, xbzeta, xlbtna]):
+            xlin.append(np.zeros(2))
+            ylin.append(np.zeros(2))
+            rlin.append(np.zeros(2))
+            zlin.append(np.zeros(2))
+            continue
+
+        # Source is at R_src from axis, at toroidal angle phi_src
+        R_src   = np.sqrt(rtcena**2 + xlbtna**2)
+        phi_src = np.deg2rad(xbzeta)
+        x_src   = R_src * np.cos(phi_src)
+        y_src   = R_src * np.sin(phi_src)
+
+        # Tangent point: co=CCW (+alpha), counter=CW (-alpha)
+        alpha   = np.arccos(np.clip(rtcena / R_src, 0.0, 1.0))
+        phi_tan = phi_src + alpha if nlco else phi_src - alpha
+        x_tan   = rtcena * np.cos(phi_tan)
+        y_tan   = rtcena * np.sin(phi_tan)
+
+        # Unit direction vector from source toward tangent point (and beyond)
+        ux = (x_tan - x_src) / xlbtna
+        uy = (y_tan - y_src) / xlbtna
+
+        # Clip to R_clip_cm: solve (x_src + t*ux)^2 + (y_src + t*uy)^2 = R_clip^2
+        b_q  = 2.0 * (x_src * ux + y_src * uy)
+        c_q  = x_src**2 + y_src**2 - R_clip_cm**2
+        disc = b_q**2 - 4.0 * c_q   # a_q = 1 (unit vector)
+
+        if disc < 0:
+            t_entry, t_exit = 0.0, 2.0 * xlbtna
+        else:
+            sqd     = np.sqrt(disc)
+            t_entry = max((-b_q - sqd) / 2.0, 0.0)
+            t_exit  = min((-b_q + sqd) / 2.0, 2.0 * xlbtna)
+
+        t_vals = np.linspace(t_entry, t_exit, 120)
+        x_beam = x_src + t_vals * ux
+        y_beam = y_src + t_vals * uy
+        R_beam = np.sqrt(x_beam**2 + y_beam**2)
+
+        xlin.append(x_beam * 1e-2)          # cm → m
+        ylin.append(y_beam * 1e-2)
+        rlin.append(R_beam * 1e-2)
+        zlin.append(np.zeros_like(R_beam))  # midplane injection (Z = 0)
+
+    return {"xlin": xlin, "ylin": ylin, "rlin": rlin, "zlin": zlin}
 
 
 def getECRHTrajectories(namelist, Theta_gyr, Phi_gyr):

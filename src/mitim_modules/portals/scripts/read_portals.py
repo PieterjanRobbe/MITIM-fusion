@@ -25,8 +25,8 @@ def main():
                         help="If set, it will plot all fluxes, not only the main ones.")
     parser.add_argument("--complete", "-c", "--full", required=False, default=False, action="store_true",
                         help="If set, it will plot the complete PORTALS results, not only the metrics.")
-    parser.add_argument("--save", type=str, required=False, default=None,
-                        help="Folder to save the figures.")
+    parser.add_argument("--save", type=str, nargs="?", const="figs", required=False, default=None,
+                        help="Folder to save the figures. If flag given without a value, defaults to 'figs'. Implies --noshow.")
     parser.add_argument("--dpi", type=int, required=False, default=120,
                         help="DPI to save the figures.")
     parser.add_argument("--noshow", required=False, default=False, action="store_true",
@@ -35,16 +35,20 @@ def main():
     # Remote options
     parser.add_argument("--remote",type=str, required=False, default=None,
                         help="Remote machine to retrieve the folders from. If not provided, it will read the local folders.")
-    parser.add_argument("--remote_folder_parent",type=str, required=False, default=None,
+    parser.add_argument("--remote_folder_parent","--remote_parent_folder",type=str, required=False, default=None,
                         help="Parent folder in the remote machine where the folders are located. If not provided, it will use --remote_folders.")
-    parser.add_argument("--remote_folders",type=str, nargs="*", required=False, default=None,
+    parser.add_argument("--remote_folders","--remote_folder",type=str, nargs="*", required=False, default=None,
                         help="List of folders in the remote machine to retrieve. If not provided, it will use the local folder structures.")
-    parser.add_argument("--remote_minimal", required=False, default=False, action="store_true",
+    parser.add_argument("--remote_minimal","--minimal", required=False, default=False, action="store_true",
                         help="If set, it will only retrieve the folder structure with a few key files.")
     parser.add_argument('--fix', required=False, default=False, action='store_true',
                         help="If set, it will fix the pkl optimization portals in the remote folders.")
 
     args = parser.parse_args()
+
+    # --save implies --noshow (headless save; no point re-rendering on screen).
+    if args.save is not None:
+        args.noshow = True
 
     # --------------------------------------------------------------------------------------------------------------------------------------------
     # Retrieve from remote

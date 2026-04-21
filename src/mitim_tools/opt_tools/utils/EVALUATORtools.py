@@ -161,9 +161,7 @@ def mitimRun(
 
     # Write results into Tabular Data, but make sure it is only one process at a time
 
-    inputs = []
-    for i in bounds:
-        inputs.append(i)
+    inputs = list(bounds)
 
     if optimization_data is not None:
         
@@ -175,7 +173,7 @@ def mitimRun(
             x,
             y,
             yE,
-            objective=objective.cpu().numpy(),
+            objective=objective.detach().cpu().numpy(),
             iteration=numEval,
         )
         
@@ -184,9 +182,7 @@ def mitimRun(
             lock.release()
 
     try:
-        y_txt = ""
-        for i in range(y.shape[0]):
-            y_txt += "\t\ty{0} = {1:.5f}, yE{0.5f} = {2:.5f}\n".format(i, y[i], yE[i])
+        y_txt = "\n".join(f"\t\ty{i} = {y[i]:.5f}, yE{i} = {yE[i]:.5f}" for i in range(y.shape[0]))
         print(f"\n~ Evaluation.{numEval} result:\n", y_txt)
     except:
         pass

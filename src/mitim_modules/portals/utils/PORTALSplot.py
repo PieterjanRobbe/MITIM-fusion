@@ -2138,11 +2138,26 @@ def PORTALSanalyzer_plotTransportModels(self, fn = None, fn_color=None):
     
     colors = GRAPHICStools.listColors()
     
+    # Lazy import — avoid dragging CGYROtools into every caller of this module
+    # when the transport-models tab isn't being rendered.
+    from mitim_tools.gacode_tools import CGYROtools
+
     k = 0
     for it in self.transport_model_objects:
-        turb = self.transport_model_objects[it]['turbulence']
+        turb = self.transport_model_objects[it].get('turbulence')
+        neo  = self.transport_model_objects[it].get('neoclassical')
+        # Skip iterations with missing halves (e.g. SR CGYRO-only populates
+        # this dict with turb=None, or a partial read where one leg failed).
+        if turb is None or neo is None:
+            continue
+        # Skip iterations where turbulence is CGYRO — the transport-models
+        # tab renders TGLF-style plots (fn_color / extratitle kwargs) that
+        # CGYROtools.CGYRO.plot does not accept, and CGYRO has its own
+        # dedicated per-rho / per-channel time-trace tabs below.
+        if isinstance(turb, CGYROtools.CGYRO):
+            continue
         turb.plot(fn=fn, fn_color=fn_color+k, labels = ['base'], extratitle=f"Turb (#{it}) - ")
-        
+
         if "distributions" in turb.__dict__:
             distributions = turb.distributions
             k += 1
@@ -2194,9 +2209,155 @@ def PORTALSanalyzer_plotTransportModels(self, fn = None, fn_color=None):
                 if var in ["Qe", "Qi"]:
                     ax.set_ylim(bottom=0)
         
-        self.transport_model_objects[it]['neoclassical'].plot(fn=fn, fn_color=fn_color+k+1, labels = ['base'], extratitle=f"Neoc (#{it}) - ")
+        neo.plot(fn=fn, fn_color=fn_color+k+1, labels = ['base'], extratitle=f"Neoc (#{it}) - ")
         k += 2
-            
+
+    # CGYRO-specific per-rho time traces: one tab per radius with
+    # Qe/Qi/Ge(t) overlaid across every PORTALS iteration, ev0 drawn on
+    # top as the baseline. Loaded lazily here (not in
+    # read_transport_models) so the TGLF/NEO path doesn't pay the cost,
+    # and so missing/failed iterations are skipped cleanly rather than
+    # aborting the plot. Actual loading and drawing live in the CGYRO
+    # tools layer so PORTALS stays model-agnostic — this block is just
+    # the PORTALS-side discovery + namelist lookup glue.
+    try:
+        from mitim_modules.portals.utils.PORTALSanalysis import _model_highest_fidelity
+        turbulence_model = _model_highest_fidelity(
+            self.powerstate.transport_options['evaluator_instance_attributes']['turbulence_model']
+        )
+    except Exception:
+        turbulence_model = None
+    # Dispatch on the backend code (namelist entry may be a named instance like 'cgyro1'
+    # whose options block sets `code: cgyro`). Fall back to the raw string if the
+    # options block is missing (e.g. during a pre-evaluate dry run).
+    code_for_dispatch = None
+    if turbulence_model is not None:
+        try:
+            opts = self.powerstate.transport_options.get('options', {}).get(turbulence_model, {}) or {}
+            code_for_dispatch = str(opts.get('code', turbulence_model)).lower()
+        except Exception:
+            code_for_dispatch = str(turbulence_model).lower()
+    if code_for_dispatch == "cgyro":
+        _plot_cgyro_time_traces_dispatch(self, fn, fn_color_start=fn_color + k + 1)
+
+
+def _iterate_portals_evaluation_folders(root_folder):
+    '''
+    Yield (iteration_index, transport_simulation_folder_path) pairs for every
+    PORTALS evaluation visible on disk, preferring the BO layout
+    (Execution/Evaluation.{N}) and falling back to the simple-relax layout
+    (Initialization/initialization_simple_relax/portals_sr_ev_{N}) when BO
+    hasn't started yet.
+
+    Numeric-suffix sorting uses PORTALSanalysis._extract_trailing_int so
+    partial runs (0, 1, 3 with 2 missing) don't truncate at the gap.
+    '''
+    from pathlib import Path
+    from mitim_modules.portals.utils.PORTALSanalysis import _extract_trailing_int
+
+    root = Path(root_folder)
+
+    bo_root = root / "Execution"
+    if bo_root.is_dir():
+        bo_evs = sorted(
+            (d for d in bo_root.glob("Evaluation.*") if d.is_dir() and _extract_trailing_int(d.name) is not None),
+            key=lambda d: _extract_trailing_int(d.name),
+        )
+        if bo_evs:
+            for d in bo_evs:
+                folder = d / "transport_simulation_folder"
+                if folder.is_dir():
+                    yield _extract_trailing_int(d.name), folder
+            return
+
+    sr_root = root / "Initialization" / "initialization_simple_relax"
+    if sr_root.is_dir():
+        sr_evs = sorted(
+            (d for d in sr_root.glob("portals_sr_ev_*") if d.is_dir() and _extract_trailing_int(d.name) is not None),
+            key=lambda d: _extract_trailing_int(d.name),
+        )
+        for d in sr_evs:
+            folder = d / "transport_simulation_folder"
+            if folder.is_dir():
+                yield _extract_trailing_int(d.name), folder
+
+
+def _plot_cgyro_time_traces_dispatch(self, fn, fn_color_start):
+    '''
+    PORTALS-side shim for the CGYRO per-rho time-trace plot. Resolves the
+    root folder, discovers iteration folders (BO or SR layout) and reads
+    the namelist's tmin / restart_from_cases config, then delegates both
+    the iteration loading and the drawing to CGYROplot so PORTALS stays
+    transport-model-agnostic. The tool cache is memoised on `self` so
+    interactive re-invocations of the plotter don't re-read pickles.
+    '''
+    from mitim_tools.gacode_tools.utils import CGYROplot
+
+    print("\t- Adding per-rho CGYRO time-trace tabs (Qe, Qi, Ge)")
+
+    # Resolve the PORTALS root folder in an attribute-agnostic way:
+    # analyzer uses self.opt_fun.folder, initializer just has self.folder.
+    opt_fun = getattr(self, "opt_fun", None)
+    root_folder = opt_fun.folder if (opt_fun is not None and getattr(opt_fun, "folder", None) is not None) else getattr(self, "folder", None)
+    if root_folder is None:
+        print("\t- Cannot resolve PORTALS root folder for CGYRO trace plot; skipping", typeMsg='w')
+        return
+
+    # Read-time config from the namelist — so the raw-fallback re-read
+    # inside CGYROplot.load_tool_for_iteration uses exactly the window
+    # PORTALS used at simulation time (pickles already carry this baked
+    # in).
+    try:
+        _cgyro_read_cfg = self.powerstate.transport_options['options']['cgyro']['read']
+        _read_kwargs = {k: v for k, v in _cgyro_read_cfg.items()
+                        if k in ("tmin", "tmin_is_rel", "last_tmin_for_linear")}
+    except Exception:
+        _read_kwargs = {}
+
+    # Resolve restart mode (drives time-axis alignment in the plotter).
+    # Same precedence as transport_cgyro.py: restart_from_folder forces
+    # overlay because we don't know the external sim's tmax.
+    try:
+        cgyro_run_cfg = self.powerstate.transport_options['options']['cgyro']['run']
+        _raw = cgyro_run_cfg.get('restart_from_cases')
+        if _raw in (None, "", "null") and cgyro_run_cfg.get('restart_from_first'):
+            _raw = "first"  # legacy alias
+        _mode = str(_raw).lower() if _raw not in (None, "", "null") else "none"
+        if cgyro_run_cfg.get('restart_from_folder') not in (None, ""):
+            _mode = "none"
+        restart_mode = _mode if _mode in ("none", "first", "all") else "none"
+    except Exception:
+        restart_mode = "none"
+
+    # Lazy cache on self so re-invocations don't re-read pickles.
+    if getattr(self, "_cgyro_traces_cache", None) is None:
+        self._cgyro_traces_cache = CGYROplot.load_tools_for_iterations(
+            _iterate_portals_evaluation_folders(root_folder),
+            self.rhos,
+            read_kwargs=_read_kwargs,
+        )
+
+    CGYROplot.plot_time_traces_per_radius(
+        fn,
+        fn_color_start,
+        self.rhos,
+        self._cgyro_traces_cache,
+        restart_mode=restart_mode,
+        base_iter=0,
+    )
+    # Same data, pivoted: one figure per channel with rhos as rows.
+    # Colour-start offset by the per-rho tab count so tab colours stay
+    # distinct in the notebook.
+    CGYROplot.plot_time_traces_per_channel(
+        fn,
+        fn_color_start + len(self.rhos),
+        self.rhos,
+        self._cgyro_traces_cache,
+        restart_mode=restart_mode,
+        base_iter=0,
+    )
+
+
 def PORTALSanalyzer_plotModelComparison(
     self,
     fig=None,

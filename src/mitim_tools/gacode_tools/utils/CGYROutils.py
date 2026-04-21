@@ -1,4 +1,5 @@
 import os
+import math
 import scipy
 import numpy as np
 from pathlib import Path
@@ -14,6 +15,57 @@ except ModuleNotFoundError:
     print("\t- Could not find pygacode module in this environment. Please install it if you need CGYRO capabilities", typeMsg='w')
 from IPython import embed
 import pandas as pd
+
+
+def compute_box_and_nradial(
+    q,
+    shear,
+    rmin,
+    ky_min,
+    L_x=90.0,
+    N_radial=256,
+    min_box_size=100,
+):
+    """
+    Pick CGYRO BOX_SIZE and N_RADIAL from local equilibrium quantities.
+
+    Port of an IDL recipe: targets a radial box length of ~L_x (in the IDL
+    author's convention) and ~N_radial radial modes, with N_RADIAL
+    constrained so N_RADIAL/BOX_SIZE is a positive integer and N_RADIAL
+    is even.
+
+    rmin is r/a (i.e., the CGYRO RMIN parameter), ky_min is the CGYRO KY
+    parameter (k_theta * rho_s at the surface). Returns (BOX_SIZE, N_RADIAL)
+    as Python ints.
+    """
+
+    rhostar_int = ky_min / (q / rmin)
+    box_fac = (rmin / (q * shear)) / rhostar_int
+    box_calc = L_x / box_fac
+
+    box_floor = int(math.floor(box_calc))
+    box_ceil = box_floor + 1
+
+    # Literal port of the IDL guard. The raw integer comparison only matches
+    # the original "never smaller than 100 rho_s" comment when box_fac ~ 1.
+    if box_floor*box_fac < min_box_size:
+        box_size = box_ceil
+    else:
+        candidates = [box_floor, box_ceil]
+        deltas = [abs(c * box_fac - L_x) for c in candidates]
+        box_size = candidates[int(np.argmin(deltas))]
+
+    r_fac = N_radial / box_size
+    if (r_fac - math.floor(r_fac)) >= 0.5:
+        r_test = int(math.floor(r_fac)) + 1
+    else:
+        r_test = int(math.floor(r_fac))
+    if (r_test * box_size) % 2 != 0:
+        r_test += 1
+    n_radial_out = int(r_test * box_size)
+
+    return int(box_size), n_radial_out
+
 
 class CGYROlinear_scan:
     def __init__(self, labels, results, irho = 0):   
@@ -68,11 +120,16 @@ class CGYROlinear_scan:
         
 
 class CGYROoutput(SIMtools.GACODEoutput):
-    def __init__(self, folder, suffix = None, tmin=0.0, minimal=False, last_tmin_for_linear=True, **kwargs):
+    def __init__(self, folder, suffix = None, tmin=0.0, tmin_is_rel=True, minimal=False, last_tmin_for_linear=True, **kwargs):
         '''
-        tmin can be used to indicate from which time onwards I want to do the signal analysis
-        if negative, it represents the relative time from the end of the simulation. e.g.
-        -0.25 means I want to consider the last 25% of the simulation time
+        tmin sets the left edge of the window used for signal analysis.
+          tmin >= 0                    : absolute time (a/cs).
+          tmin <  0, tmin_is_rel=True  : fraction of the total simulation time
+                                         counted from the end. e.g. tmin=-0.25
+                                         -> the last 25% of the run.
+          tmin <  0, tmin_is_rel=False : absolute offset (a/cs) from the end.
+                                         e.g. tmin=-200 -> the last 200 a/cs
+                                         of the run (self.tmin = t[-1] - 200).
         '''
         
         super().__init__()
@@ -143,9 +200,14 @@ class CGYROoutput(SIMtools.GACODEoutput):
         
         if tmin >= 0.0:
             self.tmin = tmin
-        else:
+        elif tmin_is_rel:
             self.tmin = self.t[-1] + tmin * (self.t[-1] - self.t[0])
-            print(f"\t- Negative tmin provided, setting tmin to {self.tmin:.3f}", typeMsg='i')
+            print(f"\t- Negative relative tmin provided ({tmin}), setting tmin to {self.tmin:.3f} (last {-tmin*100:.1f}% of run)", typeMsg='i')
+        else:
+            self.tmin = self.t[-1] + tmin
+            print(f"\t- Negative absolute tmin provided ({tmin} a/cs), setting tmin to {self.tmin:.3f} (= t[-1]={self.t[-1]:.3f} + {tmin})", typeMsg='i')
+            if self.tmin < self.t[0]:
+                print(f"\t  Warning: computed tmin ({self.tmin:.3f}) is before the start of the run (t[0]={self.t[0]:.3f}); the full time series will be used", typeMsg='w')
         
         self.ky = self.cgyrodata.kynorm
         self.kx = self.cgyrodata.kxnorm
@@ -188,48 +250,71 @@ class CGYROoutput(SIMtools.GACODEoutput):
     def read_using_cgyroplot(self, folder, suffix):
 
         original_dir = os.getcwd()
-        
-        # Handle files with suffix by creating temporary symbolic links
         self.temp_links = []
+
+        # With job arrays, CGYRO output files for each rho live side-by-side in
+        # the parent folder with a per-rho suffix (e.g. out.cgyro.info_0.8519).
+        # pygacode expects canonical names, so we stage symlinks from canonical
+        # -> suffixed for the duration of the read and clean them up after.
         if suffix:
             import glob
-            
-            # Find all files with the suffix pattern
-            pattern = f"{folder.resolve()}{os.sep}*{suffix}"
-            suffixed_files = glob.glob(pattern)
-            
-            for suffixed_file in suffixed_files:
-                # Create expected filename without suffix
-                original_name = suffixed_file.replace(suffix, '')
-                
-                # Only create symlink if the original doesn't exist and the suffixed file does
-                if not os.path.exists(original_name) and os.path.exists(suffixed_file):
-                    try:
-                        os.symlink(suffixed_file, original_name)
-                        self.temp_links.append(original_name)
-                        print(f"\t- Created temporary link: {os.path.basename(original_name)} -> {os.path.basename(suffixed_file)}")
-                    except (OSError, FileExistsError) as e:
-                        print(f"\t- Warning: Could not create symlink for {os.path.basename(suffixed_file)}: {e}", typeMsg='w')
-        
-        try:
-            print(f"\t- Reading CGYRO data from {folder.resolve()}")
-            cgyrodata = cgyrodata_plot(f"{folder.resolve()}{os.sep}")
-        except FileNotFoundError:
-            raise Exception(f"[MITIM] Could not find CGYRO data in {folder.resolve()}. Please check the folder path or run CGYRO first.")
-        except Exception as e:
-            print(f"\t- Error reading CGYRO data: {e}")
-            if print('- Could not read data, do you want me to try do "cgyro -t" in the folder?',typeMsg='q'):
-                os.chdir(folder)
-                os.system("cgyro -t")
-            cgyrodata = cgyrodata_plot(f"{folder.resolve()}{os.sep}")
-        finally:
 
+            folder_abs = folder.resolve()
+            pattern = f"{folder_abs}{os.sep}*{suffix}"
+
+            for suffixed_file in glob.glob(pattern):
+                basename = os.path.basename(suffixed_file)
+                # Strip suffix only from the basename, and only if it is a true
+                # trailing suffix — avoids collateral damage when the suffix
+                # substring happens to appear elsewhere in the path.
+                if not basename.endswith(suffix):
+                    continue
+                original_name = os.path.join(folder_abs, basename[:-len(suffix)])
+
+                # Sweep any stale symlink from a previous (possibly crashed)
+                # read so that symlink creation below is idempotent.
+                if os.path.islink(original_name):
+                    try:
+                        os.unlink(original_name)
+                    except OSError:
+                        pass
+
+                # Skip if a real file already sits at the canonical name.
+                if os.path.exists(original_name) and not os.path.islink(original_name):
+                    continue
+
+                try:
+                    os.symlink(suffixed_file, original_name)
+                    self.temp_links.append(original_name)
+                    print(f"\t- Created temporary link: {os.path.basename(original_name)} -> {basename}")
+                except OSError as e:
+                    print(f"\t- Warning: Could not create symlink for {basename}: {e}", typeMsg='w')
+
+        try:
+            try:
+                print(f"\t- Reading CGYRO data from {folder.resolve()}")
+                cgyrodata = cgyrodata_plot(f"{folder.resolve()}{os.sep}")
+            except FileNotFoundError:
+                raise Exception(f"[MITIM] Could not find CGYRO data in {folder.resolve()}. Please check the folder path or run CGYRO first.")
+            except Exception as e:
+                print(f"\t- Error reading CGYRO data: {e}")
+                if print('- Could not read data, do you want me to try do "cgyro -t" in the folder?', typeMsg='q'):
+                    os.chdir(folder)
+                    os.system("cgyro -t")
+                cgyrodata = cgyrodata_plot(f"{folder.resolve()}{os.sep}")
+        except Exception:
+            # Guarantee cleanup if the read raises so a subsequent re-read
+            # doesn't trip over stale symlinks.
+            self.remove_symlinks()
+            raise
+        finally:
             os.chdir(original_dir)
-                        
+
         return cgyrodata
 
     def remove_symlinks(self):
-        # Remove temporary symbolic links
+        # Remove temporary symbolic links (idempotent).
+        remaining = []
         for temp_link in self.temp_links:
             try:
                 if os.path.islink(temp_link):
@@ -237,6 +322,8 @@ class CGYROoutput(SIMtools.GACODEoutput):
                     print(f"\t- Removed temporary link: {os.path.basename(temp_link)}")
             except OSError as e:
                 print(f"\t- Warning: Could not remove temporary link {os.path.basename(temp_link)}: {e}", typeMsg='w')
+                remaining.append(temp_link)
+        self.temp_links = remaining
 
     def _process_linear(self):
 

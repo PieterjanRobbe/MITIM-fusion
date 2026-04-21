@@ -31,7 +31,9 @@ def initializeProblem(
     tensor_options = {
         "dtype": torch.double,
         "device": torch.device("cpu"),
-    }
+    },
+    add_fidelity_level_variable=False,
+    n_fidelities=1,
     ):
     """
     Notes:
@@ -236,7 +238,15 @@ def initializeProblem(
             else:
                 dictDVs[name] = [fixed_gradients[name][0], base_gradient, fixed_gradients[name][1]]
 
-    dictDVs['fidelity'] = [torch.tensor(0), torch.tensor(0), torch.tensor(1)]
+    # Multi-fidelity extra DV — must be appended *last* so it sits at the end of the
+    # problem_options["dvs"] ordering. The optimizer treats it as a continuous [0, N-1]
+    # knob; runModelEvaluator rounds to an int when dispatching.
+    if add_fidelity_level_variable:
+        dictDVs["fidelity_level"] = [
+            torch.tensor(0.0).to(dfT),
+            torch.tensor(0.0).to(dfT),
+            torch.tensor(float(n_fidelities - 1)).to(dfT),
+        ]
 
     # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # Define output dictionaries
@@ -279,8 +289,8 @@ def initializeProblem(
     portals_fun.name_transformed_ofs = name_transformed_ofs
     portals_fun.optimization_options["problem_options"]["ofs"] = ofs
     portals_fun.optimization_options["problem_options"]["dvs"] = [*dictDVs]
-    portals_fun.dvs_optimizer = [dv for dv in dictDVs if dv != "fidelity"]
-    portals_fun.dvs_context = [dv for dv in dictDVs if dv == "fidelity"]
+    portals_fun.dvs_optimizer = [dv for dv in dictDVs if dv != "fidelity_level"]
+    portals_fun.dvs_context = [dv for dv in dictDVs if dv == "fidelity_level"]
     portals_fun.optimization_options["problem_options"]["dvs_min"] = []
     for i in dictDVs:
         portals_fun.optimization_options["problem_options"]["dvs_min"].append(dictDVs[i][0].cpu().numpy())

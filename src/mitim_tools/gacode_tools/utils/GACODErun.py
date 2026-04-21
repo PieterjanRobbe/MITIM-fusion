@@ -36,15 +36,16 @@ def runTGYRO(
 
     tgyro_job = FARMINGtools.mitim_job(folderWork)
 
+    from mitim_tools.misc_tools import SLURMtools
     tgyro_job.define_machine(
         "tgyro",
         f"mitim_{nameRunid}",
         launchSlurm=launchSlurm,
         slurm_settings={
-            "minutes": minutes,
+            "time": SLURMtools.format_time(minutes),
             "ntasks": 1,
-            "name": nameJob,
-            "cpuspertask": nparallel,
+            "job-name": nameJob,
+            "cpus-per-task": nparallel,
         },
     )
 
@@ -377,18 +378,14 @@ def runVGEN(
         },
     )
 
-    print(
-        f"\t- Running NEO (with {vgenOptions['numspecies']} species) to populate w0(rad/s) in input.gacode file"
-    )
+    print(f"\t- Running NEO (with {vgenOptions['numspecies']} species) to populate w0(rad/s) in input.gacode file")
     print(f"\t\t> Matching ion {vgenOptions['matched_ion']} Vtor")
 
     options = f"-er {vgenOptions['er']} -vel {vgenOptions['vel']} -in {vgenOptions['numspecies']} -ix {vgenOptions['matched_ion']} -nth {vgenOptions['nth']}"
 
     # ***********************************
 
-    print(
-        f"\t\t- Proceeding to generate Er from NEO run using profiles_gen -vgen ({options})"
-    )
+    print(f"\t\t- Proceeding to generate Er from NEO run using profiles_gen -vgen ({options})")
 
     inputgacode_file = workingFolder / f"input.gacode"
 
@@ -405,7 +402,7 @@ def runVGEN(
     vgen_job.prep(
         command,
         input_files=[inputgacode_file, workingFolder / f"profiles_vgen.sh"],
-        output_files=["slurm_output.dat", "slurm_error.dat"],
+        output_folders=["vgen"],
     )
 
     vgen_job.run()
@@ -475,7 +472,8 @@ def obtainNTphase(
     else:
         gaussW = np.ones(len(x))
 
-    neTe = np.sum(y * gaussW) / np.sum(gaussW)
+    sumW = np.sum(gaussW)
+    neTe = np.sum(y * gaussW) / sumW if sumW != 0.0 else np.nan
 
     return neTe
 

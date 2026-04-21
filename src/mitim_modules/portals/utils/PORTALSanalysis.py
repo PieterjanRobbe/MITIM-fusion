@@ -1,11 +1,12 @@
 import copy
+import re
 import torch
 import json
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 from mitim_tools.opt_tools import STRATEGYtools
-from mitim_tools.misc_tools import IOtools, PLASMAtools, GRAPHICStools
+from mitim_tools.misc_tools import IOtools, PLASMAtools, GRAPHICStools, LOGtools
 from mitim_tools.gacode_tools import TGLFtools, TGYROtools, PROFILEStools
 from mitim_modules.portals.utils import PORTALSplot
 from mitim_modules.portals import PORTALStools
@@ -13,6 +14,39 @@ from mitim_modules.powertorch import STATEtools
 from mitim_modules.powertorch.utils import POWERplot
 from mitim_tools.misc_tools.LOGtools import printMsg as print
 from IPython import embed
+
+
+_TRAILING_INT_RE = re.compile(r"(\d+)$")
+
+
+def _extract_trailing_int(name):
+    """Return the trailing integer of a folder / file name, or None if there isn't one.
+    Used to sort `portals_sr_ev_<n>` folders and `input.gacode.<n>` files numerically."""
+    m = _TRAILING_INT_RE.search(name)
+    return int(m.group(1)) if m else None
+
+
+def _model_highest_fidelity(spec):
+    """In single-fidelity runs the turbulence_model / neoclassical_model entry is a
+    plain string and passes through. In multi-fidelity runs it is an int-keyed dict;
+    return the highest-fidelity (largest key) instance name so analysis / plotting
+    reports the most trusted model. Full multi-fidelity overlays are follow-up work."""
+    if isinstance(spec, dict):
+        return spec[max(spec.keys())]
+    return spec
+
+
+def _resolve_code_from_options(transport_options, instance_name):
+    """Resolve the backend code (tglf / cgyro / gx / neo) for a named instance by
+    reading transport.options.<instance_name>.code. Falls back to the instance name
+    itself (the name-equals-code convention used for the shipped defaults)."""
+    if instance_name is None:
+        return None
+    try:
+        opts = (transport_options.get('options', {}) or {}).get(instance_name, {}) or {}
+    except Exception:
+        opts = {}
+    return str(opts.get('code', instance_name)).lower()
 
 class PORTALSanalyzer:
     # ****************************************************************************
@@ -366,46 +400,124 @@ class PORTALSanalyzer:
         self.DVdistMetric_y = self.opt_fun.res.DVdistMetric_y
 
     def read_transport_models(self):
-        
-        its = [0,self.ibest]
-        
-        turbulence_model = self.powerstate.transport_options['evaluator_instance_attributes']['turbulence_model']
-        neoclassical_model = self.powerstate.transport_options['evaluator_instance_attributes']['neoclassical_model']
-        
+        '''
+        Populate self.transport_model_objects with {'turbulence': tool,
+        'neoclassical': tool} entries for iteration 0 and the best iteration
+        (self.ibest). Reads are scoped to those two iterations only — the full
+        per-iteration history is loaded lazily by the CGYRO time-trace tabs.
+
+        Safe to the point of being defensive: any unrecognised model string
+        and any individual read failure leaves the corresponding slot as
+        `None` rather than propagating the exception. Downstream plotters
+        already tolerate None halves (see PORTALSanalyzer_plotTransportModels).
+        '''
+        its = [0, self.ibest]
+
+        try:
+            turbulence_model = _model_highest_fidelity(
+                self.powerstate.transport_options['evaluator_instance_attributes']['turbulence_model']
+            )
+        except Exception:
+            turbulence_model = None
+        try:
+            neoclassical_model = _model_highest_fidelity(
+                self.powerstate.transport_options['evaluator_instance_attributes']['neoclassical_model']
+            )
+        except Exception:
+            neoclassical_model = None
+
+        # `turb_key` / `neo_key` are the *instance* names (folder suffixes on disk); the
+        # backend *code* (what we dispatch on) is resolved from transport.options.<name>.code.
+        # In single-fidelity the two are identical (e.g. 'tglf'); in named multi-fidelity
+        # they differ (e.g. turb_key='tglf1', turb_code='tglf').
+        turb_key = str(turbulence_model) if turbulence_model is not None else None
+        neo_key = str(neoclassical_model) if neoclassical_model is not None else None
+        turb_code = _resolve_code_from_options(self.powerstate.transport_options, turb_key)
+        neo_code = _resolve_code_from_options(self.powerstate.transport_options, neo_key)
+
+        # Warn once (not per iteration) when the model string isn't one we
+        # know how to read. The slots land as None and downstream plotting
+        # degrades gracefully.
+        _known_turb = {"tglf", "cgyro"}
+        _known_neo = {"neo"}
+        if turb_code is not None and turb_code not in _known_turb:
+            print(f"\t- read_transport_models: unknown turbulence_model={turbulence_model!r}; leaving turb=None", typeMsg='w')
+        if neo_code is not None and neo_code not in _known_neo:
+            print(f"\t- read_transport_models: unknown neoclassical_model={neoclassical_model!r}; leaving neo=None", typeMsg='w')
+
+        # CGYRO read kwargs (tmin/tmin_is_rel) come from the same namelist
+        # entry the trace-plot dispatcher uses, so the plot-time re-read
+        # reproduces the averaging window PORTALS actually used.
+        cgyro_read_kwargs = {}
+        if turb_code == "cgyro":
+            try:
+                _cgyro_read_cfg = self.powerstate.transport_options['options'][turb_key]['read']
+                cgyro_read_kwargs = {k: v for k, v in _cgyro_read_cfg.items()
+                                     if k in ("tmin", "tmin_is_rel", "last_tmin_for_linear")}
+            except Exception:
+                cgyro_read_kwargs = {}
+
         for it in its:
             folder_execution = self.opt_fun.folder / "Execution" / f"Evaluation.{it}" / "transport_simulation_folder"
-            
-            if turbulence_model.lower() == "tglf":
-                from mitim_tools.gacode_tools import TGLFtools
-                tglf = TGLFtools.TGLF(rhos=self.rhos)
-                tglf.read(folder=folder_execution / "base_tglf", label=f"base", input_gacode=folder_execution / "input.gacode_torun")
-                
-                # ---------------------------------------
-                # Extract turbulence drives distributions
-                # ---------------------------------------
-                
-                # Find subfolders with that preffix
-                subfolders = [f for f in (folder_execution).iterdir() if f.is_dir() and f.name.startswith("turb_drives_")]
-                subfolders.append( folder_execution / "base_tglf")
-                distributions_x = []
-                distributions_y = {'Qe': [], 'Qi': [], 'Ge': []}
-                for subfolder in subfolders:
-                    label = subfolder.name #[len("turb_drives_"):]
-                    tglf.read(folder=subfolder, label=label, input_gacode=folder_execution / "input.gacode_torun", require_all_files=False)
 
-                    distributions_x.append(label)
-                    distributions_y['Qe'].append([tglf.results[label]['output'][i].Qe_unn for i in range(tglf.rhos.shape[0])])
-                    distributions_y['Qi'].append([tglf.results[label]['output'][i].Qi_unn for i in range(tglf.rhos.shape[0])])
-                    distributions_y['Ge'].append([tglf.results[label]['output'][i].Ge_unn for i in range(tglf.rhos.shape[0])])
-                
-                tglf.distributions = {'x': distributions_x, 'y': distributions_y}
-                
-            if neoclassical_model.lower() == "neo":
+            turb = None
+            neo = None
+
+            # --- Turbulence leg ---
+            if turb_code == "tglf":
+                from mitim_tools.gacode_tools import TGLFtools
+                try:
+                    tglf = TGLFtools.TGLF(rhos=self.rhos)
+                    print(f"> Reading TGLF results for evaluation {it} (not printing to avoid cluttering the terminal)")
+                    with LOGtools.HiddenPrints():
+                        tglf.read(folder=folder_execution / f"base_{turb_key}", label=f"base", input_gacode=folder_execution / "input.gacode_torun")
+
+                    # Extract turbulence-drives distributions (if any).
+                    subfolders = [f for f in folder_execution.iterdir() if f.is_dir() and f.name.startswith("turb_drives_")]
+                    subfolders.append(folder_execution / f"base_{turb_key}")
+                    distributions_x = []
+                    distributions_y = {'Qe': [], 'Qi': [], 'Ge': []}
+                    for subfolder in subfolders:
+                        label = subfolder.name
+                        with LOGtools.HiddenPrints():
+                            tglf.read(folder=subfolder, label=label, input_gacode=folder_execution / "input.gacode_torun", require_all_files=False)
+                        distributions_x.append(label)
+                        distributions_y['Qe'].append([tglf.results[label]['output'][i].Qe_unn for i in range(tglf.rhos.shape[0])])
+                        distributions_y['Qi'].append([tglf.results[label]['output'][i].Qi_unn for i in range(tglf.rhos.shape[0])])
+                        distributions_y['Ge'].append([tglf.results[label]['output'][i].Ge_unn for i in range(tglf.rhos.shape[0])])
+
+                    tglf.distributions = {'x': distributions_x, 'y': distributions_y}
+                    turb = tglf
+                except Exception as e:
+                    print(f"\t- TGLF read failed for evaluation {it} ({e}); leaving turb=None", typeMsg='w')
+                    turb = None
+            elif turb_code == "cgyro":
+                # Same loader the trace-plot dispatcher uses; returns None on
+                # failure, no exceptions bubbled. Scoped to a single iteration
+                # so this is far cheaper than the full-history lazy cache in
+                # _plot_cgyro_time_traces_dispatch.
+                from mitim_tools.gacode_tools.utils import CGYROplot
+                print(f"> Reading CGYRO results for evaluation {it}")
+                try:
+                    turb = CGYROplot.load_tool_for_iteration(folder_execution, self.rhos, read_kwargs=cgyro_read_kwargs)
+                except Exception as e:
+                    print(f"\t- CGYRO load failed for evaluation {it} ({e}); leaving turb=None", typeMsg='w')
+                    turb = None
+
+            # --- Neoclassical leg ---
+            if neo_code == "neo":
                 from mitim_tools.gacode_tools import NEOtools
-                neo = NEOtools.NEO(rhos=self.rhos)
-                neo.read(folder=folder_execution / "base_neo", label=f"base", input_gacode=folder_execution / "input.gacode_torun")
-                
-            self.transport_model_objects[it] = {"turbulence": tglf, "neoclassical": neo}
+                try:
+                    neo_obj = NEOtools.NEO(rhos=self.rhos)
+                    print(f"> Reading NEO results for evaluation {it} (not printing to avoid cluttering the terminal)")
+                    with LOGtools.HiddenPrints():
+                        neo_obj.read(folder=folder_execution / f"base_{neo_key}", label=f"base", input_gacode=folder_execution / "input.gacode_torun")
+                    neo = neo_obj
+                except Exception as e:
+                    print(f"\t- NEO read failed for evaluation {it} ({e}); leaving neo=None", typeMsg='w')
+                    neo = None
+
+            self.transport_model_objects[it] = {"turbulence": turb, "neoclassical": neo}
                 
     # ****************************************************************************
     # PLOTTING
@@ -416,6 +528,30 @@ class PORTALSanalyzer:
             from mitim_tools.misc_tools.GUItools import FigureNotebook
 
             self.fn = FigureNotebook("PORTALS Summary", geometry="1700x1000", show=not noshow)
+
+        # Always attempt to render the SR initialization tabs — the simple-
+        # relax trajectory that seeded the BO loop is useful context even
+        # (especially) after the run has progressed past initialization.
+        # Hand our FigureNotebook to the initializer via sr_init.fn so its
+        # full tab set (PowerState, PowerStateSTDS, Sequence) lands inline
+        # with the rest of the PORTALS summary instead of the
+        # single-summary-figure branch that `fig=` used to trigger.
+        try:
+            sr_init = PORTALSinitializer(self.opt_fun.folder)
+            if len(sr_init.powerstates) > 0:
+                sr_init.fn = self.fn
+                # Only the power-state tabs, not the Sequence / transport-
+                # models ones. The analyzer already owns its own PROFILES,
+                # Metrics, Expected, Debugger tabs; we don't want the
+                # initializer to duplicate transport-model content.
+                sr_init.plotMetrics(
+                    label_main="SR Initialization",
+                    label_stds="SR Initialization STDs",
+                    label_sequence=False,
+                    show_transport_models=False,
+                )
+        except Exception:
+            pass
 
         fig = self.fn.add_figure(label="PROFILES Ranges", tab_color=tab_color_istart if tabs_colors_common is None else tabs_colors_common)
         self.plotRanges(fig=fig)
@@ -1019,53 +1155,277 @@ class PORTALSinitializer:
     def __init__(self, folder):
         self.folder = IOtools.expandPath(folder)
 
-        # Read powerstates
-        self.powerstates = []
+        # Read profiles that have already been emitted by the Evaluation pipeline.
+        # We glob + numerically sort rather than walking a contiguous integer range so that
+        # partial-initialization states with gaps (e.g. trajectory 0 finished, trajectory 1
+        # still running) do not truncate the list at the first missing index.
         self.profiles = []
-        for i in range(100):
+        profiles_dir = self.folder / "Outputs" / "portals_profiles"
+        profile_files = sorted(
+            (p for p in profiles_dir.glob("input.gacode.*") if _extract_trailing_int(p.name) is not None),
+            key=lambda p: _extract_trailing_int(p.name),
+        ) if profiles_dir.exists() else []
+        for prof_path in profile_files:
+            if _extract_trailing_int(prof_path.name) is None:
+                continue
             try:
-                prof = PROFILEStools.gacode_state(
-                    self.folder / "Outputs" / "portals_profiles" / f"input.gacode.{i}"
-                )
+                self.profiles.append(PROFILEStools.gacode_state(prof_path))
             except FileNotFoundError:
-                break
-            self.profiles.append(prof)
+                continue
 
-        for i in range(100):
-            try:
-                p = STATEtools.read_saved_state(
-                    self.folder / "Initialization" / "initialization_simple_relax" / f"portals_sr_ev_{i}" / "powerstate.pkl"
-                )
-            except FileNotFoundError:
-                break
-
-            p.profiles.derive_quantities()
-            self.powerstates.append(p)
+        # Read powerstates written by initialization_simple_relax. Folders are laid out in
+        # step-major order across parallel trajectories (see PORTALSoptimization.initialization_simple_relax),
+        # so we glob every `portals_sr_ev_*` directory and sort by the numeric suffix. Each folder
+        # may or may not yet contain `powerstate.pkl` — skip the ones that don't.
+        self.powerstates = []
+        self.n_trajectories = 1
+        init_dir = self.folder / "Initialization" / "initialization_simple_relax"
+        if init_dir.exists():
+            powerstate_dirs = sorted(
+                (d for d in init_dir.glob("portals_sr_ev_*") if d.is_dir()),
+                key=lambda d: _extract_trailing_int(d.name) or 0,
+            )
+            for d in powerstate_dirs:
+                pkl = d / "powerstate.pkl"
+                if not pkl.exists():
+                    continue
+                try:
+                    p = STATEtools.read_saved_state(pkl)
+                except FileNotFoundError:
+                    continue
+                batch_size = getattr(p, "batch_size", 0) or 1
+                if batch_size > 1:
+                    self.n_trajectories = batch_size
+                if batch_size <= 1:
+                    p.profiles.derive_quantities()
+                    self.powerstates.append(p)
+                else:
+                    for b in range(batch_size):
+                        p_b = copy.deepcopy(p)
+                        p_b._repeat_tensors(batch_size=1, positionToUnrepeat=b)
+                        p_b.profiles.derive_quantities()
+                        self.powerstates.append(p_b)
 
         self.fn = None
 
-    def plotMetrics(self, extra_lab="", **kwargs):
+        # Expose the minimal attribute surface that PORTALSanalyzer_plotTransportModels
+        # (and its CGYRO traces helper) reads: a representative powerstate, the rho grid,
+        # and an empty transport_model_objects dict populated on demand by
+        # read_transport_models_sr().
+        self.transport_model_objects = {}
+        if self.powerstates:
+            self.powerstate = self.powerstates[-1]
+            try:
+                self.rhos = self.powerstate.plasma["rho"][0, 1:].cpu().numpy()
+            except Exception:
+                self.rhos = None
+        else:
+            self.powerstate = None
+            self.rhos = None
 
+    def read_transport_models_sr(self):
+        '''
+        SR-time counterpart to PORTALSanalyzer.read_transport_models. Populates
+        self.transport_model_objects with {'turbulence': tool, 'neoclassical': tool}
+        entries for iteration 0 and the last available SR iteration, reading TGLF
+        and NEO from
+          <folder>/Initialization/initialization_simple_relax/portals_sr_ev_{N}/transport_simulation_folder/
+        Best-effort: missing files / unreadable iterations print a warning and
+        leave transport_model_objects empty, so the downstream plot degrades
+        silently.
+        '''
+        from mitim_modules.portals.utils.PORTALSplot import _iterate_portals_evaluation_folders
+
+        if self.powerstate is None:
+            print("\t- Cannot read SR transport models: no powerstates loaded", typeMsg='w')
+            return
+
+        try:
+            turbulence_model = _model_highest_fidelity(
+                self.powerstate.transport_options['evaluator_instance_attributes']['turbulence_model']
+            )
+            neoclassical_model = _model_highest_fidelity(
+                self.powerstate.transport_options['evaluator_instance_attributes']['neoclassical_model']
+            )
+        except Exception as e:
+            print(f"\t- Could not read transport-model config from powerstate ({e}); skipping SR transport-models plot", typeMsg='w')
+            return
+
+        its_and_folders = list(_iterate_portals_evaluation_folders(self.folder))
+        if not its_and_folders:
+            return
+        # Pick iteration 0 and the latest *completed* iteration — same shape as
+        # analyzer's [0, ibest]. Completed is determined by len(self.powerstates)
+        # (PORTALSinitializer only appends a powerstate when that iteration's
+        # powerstate.pkl was found), so a half-finished portals_sr_ev_N folder
+        # present on disk isn't mistaken for the latest.
+        its_map = {it: f for it, f in its_and_folders}
+        its_to_read = [0] if 0 in its_map else []
+        latest_completed = len(self.powerstates) - 1 if self.powerstates else -1
+        if latest_completed > 0 and latest_completed in its_map:
+            its_to_read.append(latest_completed)
+        if not its_to_read:
+            return
+
+        # `*_key` is the instance name (drives folder naming); `*_code` is the backend
+        # code (drives dispatch). Identical in single-fidelity; differ under named
+        # multi-fidelity instances (e.g. key='tglf1', code='tglf').
+        turb_key = str(turbulence_model) if turbulence_model is not None else None
+        neo_key = str(neoclassical_model) if neoclassical_model is not None else None
+        turb_code = _resolve_code_from_options(self.powerstate.transport_options, turb_key)
+        neo_code = _resolve_code_from_options(self.powerstate.transport_options, neo_key)
+
+        for it in its_to_read:
+            folder_execution = its_map[it]
+            turb = neo = None
+
+            if turb_code == "tglf":
+                try:
+                    from mitim_tools.gacode_tools import TGLFtools
+                    tglf = TGLFtools.TGLF(rhos=self.rhos)
+                    print(f"> [SR] Reading TGLF results for evaluation {it}")
+                    with LOGtools.HiddenPrints():
+                        tglf.read(folder=folder_execution / f"base_{turb_key}", label="base",
+                                  input_gacode=folder_execution / "input.gacode_torun")
+                    # Turbulence-drives distributions (mirrors analyzer block).
+                    subfolders = [f for f in folder_execution.iterdir() if f.is_dir() and f.name.startswith("turb_drives_")]
+                    subfolders.append(folder_execution / f"base_{turb_key}")
+                    distributions_x = []
+                    distributions_y = {'Qe': [], 'Qi': [], 'Ge': []}
+                    for subfolder in subfolders:
+                        label = subfolder.name
+                        try:
+                            with LOGtools.HiddenPrints():
+                                tglf.read(folder=subfolder, label=label,
+                                          input_gacode=folder_execution / "input.gacode_torun",
+                                          require_all_files=False)
+                        except Exception:
+                            continue
+                        distributions_x.append(label)
+                        distributions_y['Qe'].append([tglf.results[label]['output'][i].Qe_unn for i in range(tglf.rhos.shape[0])])
+                        distributions_y['Qi'].append([tglf.results[label]['output'][i].Qi_unn for i in range(tglf.rhos.shape[0])])
+                        distributions_y['Ge'].append([tglf.results[label]['output'][i].Ge_unn for i in range(tglf.rhos.shape[0])])
+                    tglf.distributions = {'x': distributions_x, 'y': distributions_y}
+                    turb = tglf
+                except Exception as e:
+                    print(f"\t- [SR] TGLF read failed for ev{it} ({e}); skipping", typeMsg='w')
+
+            if neo_code == "neo":
+                try:
+                    from mitim_tools.gacode_tools import NEOtools
+                    neo_tool = NEOtools.NEO(rhos=self.rhos)
+                    print(f"> [SR] Reading NEO results for evaluation {it}")
+                    with LOGtools.HiddenPrints():
+                        neo_tool.read(folder=folder_execution / f"base_{neo_key}", label="base",
+                                      input_gacode=folder_execution / "input.gacode_torun")
+                    neo = neo_tool
+                except Exception as e:
+                    print(f"\t- [SR] NEO read failed for ev{it} ({e}); skipping", typeMsg='w')
+
+            # Only populate when BOTH halves are present: PORTALSanalyzer_plotTransportModels
+            # unconditionally calls .plot() on both, so a half-populated entry
+            # would NoneType-crash. For CGYRO-only runs (turb is None because
+            # we skip TGLF), leave transport_model_objects empty — the CGYRO
+            # traces plot downstream still renders the per-rho time traces,
+            # which is the information the user cares about in that case.
+            if turb is not None and neo is not None:
+                self.transport_model_objects[it] = {"turbulence": turb, "neoclassical": neo}
+
+    def plotMetrics(
+        self,
+        extra_lab="",
+        label_main=None,
+        label_stds=None,
+        label_sequence=None,
+        show_transport_models=True,
+        **kwargs,
+    ):
+        '''
+        Per-tab labels default to `"{extra_lab} - <kind>"` (PowerState /
+        PowerStateSTDS / Sequence). Any of `label_main`, `label_stds`,
+        `label_sequence` overrides its own tab's label. Pass
+        `label_sequence=False` (or any non-string falsy value other than
+        None) to suppress the Sequence tab entirely — useful when the
+        caller only wants the power-state figures, e.g. PORTALSanalyzer
+        rendering the SR initialization inline with its summary.
+
+        `show_transport_models=False` suppresses the TGLF / NEO / CGYRO
+        transport-model tab block at the end — the analyzer already owns
+        its own transport-models rendering for the main BO run and
+        doesn't want the SR copy on top of that.
+        '''
         if len(self.powerstates) == 0:
             print("- No powerstates available to plot metrics", typeMsg="w")
             return
 
+        # Resolve per-tab labels. None -> auto from extra_lab. Explicit
+        # False for label_sequence turns the Sequence tab off.
+        lbl_main = label_main if label_main is not None else f"{extra_lab} - PowerState"
+        lbl_stds = label_stds if label_stds is not None else f"{extra_lab} - PowerStateSTDS"
+        if label_sequence is None:
+            lbl_seq = f"{extra_lab} - Sequence"
+        elif label_sequence is False:
+            lbl_seq = None
+        else:
+            lbl_seq = label_sequence
+
         # Prepare figure --------------------------------------------------
+        figMainStds = None
+        figG = None
         if 'fig' in kwargs and kwargs['fig'] is not None:
             print('Using provided figure, assuming I only want a summary')
             figMain = kwargs['fig']
-            figG = None
         else:
             if self.fn is None:
                 from mitim_tools.misc_tools.GUItools import FigureNotebook
                 self.fn = FigureNotebook("PowerState", geometry="1800x900")
-            figMain = self.fn.add_figure(label=f"{extra_lab} - PowerState")
-            figG = self.fn.add_figure(label=f"{extra_lab} - Sequence")
+            figMain = self.fn.add_figure(label=lbl_main)
+            # Same layout as PowerState, but the flux panels carry errorbars
+            # drawn from each evaluation's per-channel std (quadrature sum of
+            # the turbulent and neoclassical _stds). Gives a per-iteration
+            # view of how confident the transport evaluator was, on top of
+            # the mean trace already shown on the PowerState tab.
+            figMainStds = self.fn.add_figure(label=lbl_stds)
+            if lbl_seq is not None:
+                figG = self.fn.add_figure(label=lbl_seq)
         # -----------------------------------------------------------------
 
-        axs, axsM = STATEtools.add_axes_powerstate_plot(figMain, num_kp=np.max([3,len(self.powerstates[-1].predicted_channels)]))
+        num_kp = np.max([3, len(self.powerstates[-1].predicted_channels)])
+        axs, axsM = STATEtools.add_axes_powerstate_plot(figMain, num_kp=num_kp)
+        axs_stds = None
+        axsM_stds = None
+        if figMainStds is not None:
+            axs_stds, axsM_stds = STATEtools.add_axes_powerstate_plot(figMainStds, num_kp=num_kp)
+            # Figure-level note so readers know what the errorbars mean.
+            figMainStds.suptitle(
+                "PowerStateSTDS — errorbars on transport fluxes show $\\pm 2\\sigma$ per evaluation "
+                "($\\sigma$ = quadrature sum of turbulent + neoclassical stds)",
+                fontsize=10,
+            )
 
-        colors = GRAPHICStools.listColors()
+        n_traj = self.n_trajectories
+        n_ps = len(self.powerstates)
+        steps_per_traj = n_ps // n_traj if n_traj > 1 else n_ps
+
+        # Per-trajectory color palette: each trajectory gets a distinct base color.
+        # Within a trajectory, steps use the same color with increasing alpha.
+        _TRAJ_COLORS = ['tab:blue', 'tab:red', 'tab:green', 'tab:orange', 'tab:purple',
+                        'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+        if n_traj > 1:
+            import matplotlib.colors as mcolors
+            def _color_for(traj, step):
+                base = mcolors.to_rgba(_TRAJ_COLORS[traj % len(_TRAJ_COLORS)])
+                alpha = 0.35 + 0.65 * (step / max(steps_per_traj - 1, 1))
+                return (*base[:3], alpha)
+            def _label_for(traj, step):
+                return f"T{traj} s{step}"
+        else:
+            all_colors = GRAPHICStools.listColors()
+            def _color_for(traj, step):
+                return all_colors[step % len(all_colors)]
+            def _label_for(traj, step):
+                return f"#{step}"
+
         axsGrads_extra = []
         cont = 0
         for i in range(np.max([3,len(self.powerstates[-1].predicted_channels)])):
@@ -1078,16 +1438,28 @@ class PORTALSinitializer:
         # ---------------------------------------------------------------------------------
 
         if len(self.powerstates) > 0:
-            for i in range(len(self.powerstates)):
-                self.powerstates[i].plot(axs=axs, c=colors[i], label=f"#{i}")
+            for i in range(n_ps):
+                if n_traj > 1:
+                    # Step-major order: index i maps to (step, traj)
+                    traj_idx = i % n_traj
+                    step_idx = i // n_traj
+                else:
+                    traj_idx, step_idx = 0, i
 
-                # Add profiles too
+                c = _color_for(traj_idx, step_idx)
+                lab = _label_for(traj_idx, step_idx)
+
+                self.powerstates[i].plot(axs=axs, c=c, label=lab)
+
+                if axs_stds is not None:
+                    self.powerstates[i].plot(axs=axs_stds, c=c, label=lab, show_stds=True)
+
                 self.powerstates[i].profiles.plot_gradients(
                     axsGrads_extra,
-                    color=colors[i],
+                    color=c,
                     plotImpurity=self.powerstates[-1].impurityPosition if 'nZ' in self.powerstates[-1].predicted_channels else None,
                     plotRotation='w0' in self.powerstates[0].predicted_channels,
-                    ls='-',
+                    ls='-' if n_traj <= 1 else ('-' if traj_idx == 0 else '--'),
                     lw=0.5,
                     lastRho=self.powerstates[0].plasma["rho"][-1, -1].item(),
                     label='',
@@ -1096,10 +1468,11 @@ class PORTALSinitializer:
             axs[0].legend(prop={"size": 8})
 
         # Add next profile
+        next_color = 'k'
         if len(self.profiles) > len(self.powerstates):
             self.profiles[-1].plot_gradients(
                 axsGrads_extra,
-                color=colors[i+1],
+                color=next_color,
                 plotImpurity=self.powerstates[-1].impurityPosition_transport if 'nZ' in self.powerstates[-1].predicted_channels else None,
                 plotRotation='w0' in self.powerstates[0].predicted_channels,
                 ls='-',
@@ -1108,13 +1481,24 @@ class PORTALSinitializer:
                 label=f"next ({len(self.profiles)-len(self.powerstates)})",
             )
 
-        # Metrics
+        # Metrics (residual + Pfus) — replicated on both figures so the
+        # STDS tab is a self-contained parallel of PowerState rather than
+        # a fragment that forces the reader to tab-hop for context.
         POWERplot.plot_metrics_powerstates(
             axsM,
             self.powerstates,
             profiles = self.profiles[-1] if len(self.profiles) > len(self.powerstates) else None,
-            profiles_color=colors[i+1],
+            profiles_color=next_color,
+            n_trajectories=n_traj,
         )
+        if axsM_stds is not None:
+            POWERplot.plot_metrics_powerstates(
+                axsM_stds,
+                self.powerstates,
+                profiles=self.profiles[-1] if len(self.profiles) > len(self.powerstates) else None,
+                profiles_color=next_color,
+                n_trajectories=n_traj,
+            )
 
         # GRADIENTS
         if figG is not None:
@@ -1122,24 +1506,30 @@ class PORTALSinitializer:
                 grid = plt.GridSpec(2, 5, hspace=0.3, wspace=0.3)
                 axsGrads = []
                 for j in range(5):
-                    for i in range(2):
-                        axsGrads.append(figG.add_subplot(grid[i, j]))
+                    for ii in range(2):
+                        axsGrads.append(figG.add_subplot(grid[ii, j]))
                 for i, p in enumerate(self.powerstates):
+                    if n_traj > 1:
+                        traj_idx = i % n_traj
+                        step_idx = i // n_traj
+                    else:
+                        traj_idx, step_idx = 0, i
+                    c = _color_for(traj_idx, step_idx)
+                    lab = _label_for(traj_idx, step_idx)
                     p.profiles.plot_gradients(
                         axsGrads,
-                        color=colors[i],
+                        color=c,
                         plotImpurity=p.impurityPosition if 'nZ' in p.predicted_channels else None,
                         plotRotation='w0' in p.predicted_channels,
                         lastRho=self.powerstates[0].plasma["rho"][-1, -1].item(),
-                        label=f"profile #{i}",
+                        label=lab,
                     )
-
 
                 if len(self.profiles) > len(self.powerstates):
                     prof = self.profiles[-1]
                     prof.plot_gradients(
                         axsGrads,
-                        color=colors[i+1],
+                        color=next_color,
                         plotImpurity=p.impurityPosition_transport if 'nZ' in p.predicted_channels else None,
                         plotRotation='w0' in p.predicted_channels,
                         lastRho=p.plasma["rho"][-1, -1].item(),
@@ -1148,6 +1538,28 @@ class PORTALSinitializer:
 
                 axs[0].legend(prop={"size": 8})
                 axsGrads[0].legend(prop={"size": 8})
+
+        # --------------------------------------------------------------------
+        # Transport-models tabs (TGLF distributions, NEO, CGYRO traces) — same
+        # tabs a fully-converged BO case produces via
+        # PORTALSanalyzer_plotTransportModels, but reading from the SR layout
+        # so they appear on SR-only runs too. Best-effort: if nothing readable
+        # is on disk, no extra tabs are added. Skipped when the caller asks
+        # for the SR-only summary view (show_transport_models=False), which
+        # is how PORTALSanalyzer avoids duplicating its own transport-models
+        # rendering.
+        # --------------------------------------------------------------------
+        if show_transport_models and self.fn is not None and self.powerstate is not None:
+            try:
+                self.read_transport_models_sr()
+            except Exception as e:
+                print(f"\t- Could not read SR transport-model info ({e}); skipping extra tabs", typeMsg='w')
+            from mitim_modules.portals.utils.PORTALSplot import PORTALSanalyzer_plotTransportModels
+            fn_color_base = kwargs.get('fn_color', 2) if kwargs else 2
+            try:
+                PORTALSanalyzer_plotTransportModels(self, fn=self.fn, fn_color=fn_color_base)
+            except Exception as e:
+                print(f"\t- SR transport-models plot failed ({e}); continuing without extra tabs", typeMsg='w')
 
 
 def surrogate_file_expansion(

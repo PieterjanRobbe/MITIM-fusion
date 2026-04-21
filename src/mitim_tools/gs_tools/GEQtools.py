@@ -21,14 +21,18 @@ Modifications are made in MITIM for visualizations and a few extra derivations.
 """
 
 class MITIMgeqdsk:
-    def __init__(self, filename):
+    def __init__(self, filename, refine=1):
 
         self.g = megpy.Equilibrium()
         try:
             self.g.read_geqdsk(f_path=filename)
         except ValueError:
             raise ValueError("-> MITIMgeqdsk: Problem reading g-eqdsk file ", filename)
-        self.g.add_derived(incl_fluxsurfaces=True, analytic_shape=True, incl_B=True)
+        try:
+            self.g.add_derived(incl_fluxsurfaces=True, analytic_shape=True, incl_B=True, refine=refine)
+        except:
+            print('> Reading geqdsk derived quantities failed, trying increasing refine parameter', typeMsg='w')
+            self.g.add_derived(incl_fluxsurfaces=True, analytic_shape=True, incl_B=True, refine=refine+1)
 
         # Extra derivations in MITIM
         self.derive()
@@ -86,7 +90,7 @@ class MITIMgeqdsk:
 
         self.Jerror = np.abs(self.Jt - self.Jt_fb)
 
-        self.Ip = self.g.raw["current"]
+        self.Ip = self.g.derived["current"]
         
         self.a = self.g.derived["r"][-1]
         self.Rmag = self.g.derived["Ro"][0]
@@ -113,7 +117,7 @@ class MITIMgeqdsk:
             The shaping parameters calculated using fluxsurfaces are correct though.
         """
 
-        self.Rb_gfile, self.Yb_gfile = self.g.raw["rbbbs"].copy(), self.g.raw["zbbbs"].copy()
+        self.Rb_gfile, self.Yb_gfile = self.g.derived["rbbbs"].copy(), self.g.derived["zbbbs"].copy()
         self.Rb, self.Yb = self.g.fluxsurfaces["R"][-1], self.g.fluxsurfaces["Z"][-1]
         
         if len(self.Rb) == 0:
@@ -401,7 +405,7 @@ class MITIMgeqdsk:
     # -----------------------------------------------------------------------------
     # For MAESTRO and TRANSP converstions
     # -----------------------------------------------------------------------------
-    def to_profiles(self, ne0_20 = 1.0, Zeff = 1.5, PichT = 1.0,  Z = 9, coeffs_MXH = 7, plotYN = False):
+    def to_profiles(self, ne0_20 = 1.0, Zeff = 1.5, Paux = 1.0,  Z = 9, coeffs_MXH = 7, plotYN = False, aux_channels = None):
 
         # -------------------------------------------------------------------------------------------------------
         # Quantities from the equilibrium
@@ -410,13 +414,13 @@ class MITIMgeqdsk:
         rhotor = self.g.derived['rho_tor']
         psi = self.g.derived['psi']                          # Wb/rad
         torfluxa = self.g.derived['phi'][-1] / (2*np.pi)     # Wb/rad
-        q = self.g.raw['qpsi']
-        pressure = self.g.raw['pres']       # Pa
-        Ip = self.g.raw['current']*1E-6     # MA
+        q = self.g.derived['qpsi']
+        pressure = self.g.derived['pres']       # Pa
+        Ip = self.g.derived['current']*1E-6     # MA
 
         RZ = np.array([self.Rb,self.Yb]).T
         R0 = (RZ.max(axis=0)[0] + RZ.min(axis=0)[0])/2
-        B0 = self.g.raw['rcentr']*self.g.raw['bcentr'] / R0
+        B0 = self.g.derived['rcentr']*self.g.derived['bcentr'] / R0
 
         _, rmaj, rmin, zmag, kappa, cn, sn = self.get_MXH_coeff_new(n_coeff=coeffs_MXH)
 
@@ -429,7 +433,8 @@ class MITIMgeqdsk:
             ne0_20 = ne0_20,
             Zeff = Zeff,
             Z = Z,
-            PichT = PichT
+            Paux = Paux,
+            aux_channels = aux_channels
         )
 
         # -------------------------------------------------------------------------------------------------------
@@ -446,13 +451,13 @@ class MITIMgeqdsk:
 
         return p
 
-    def to_transp(self, folder = '~/scratch/', shot = '12345', runid = 'P01', ne0_20 = 1E19, Vsurf = 0.0, Zeff = 1.5, PichT_MW = 11.0, times = [0.0,1.0]):
+    def to_transp(self, folder = '~/scratch/', shot = '12345', runid = 'P01', ne0_20 = 1E19, Vsurf = 0.0, Zeff = 1.5, Paux_MW = 11.0, times = [0.0,1.0]):
 
         print("\t- Converting to TRANSP")
         folder = IOtools.expandPath(folder)
         folder.mkdir(parents=True, exist_ok=True)
 
-        p = self.to_profiles(ne0_20 = ne0_20, Zeff = Zeff, PichT = PichT_MW)
+        p = self.to_profiles(ne0_20 = ne0_20, Zeff = Zeff, Paux = Paux_MW)
         p.write_state(folder / 'input.gacode')
 
         transp = p.to_transp(folder = folder, shot = shot, runid = runid, times = times, Vsurf = Vsurf)
@@ -1189,7 +1194,7 @@ class freegs_millerized:
         # From geqdsk to profiles
         return g.to_profiles()
 
-    def to_transp(self, folder = '~/scratch/', shot = '12345', runid = 'P01', ne0_20 = 1E19, Vsurf = 0.0, Zeff = 1.5, PichT_MW = 11.0, times = [0.0,1.0]):
+    def to_transp(self, folder = '~/scratch/', shot = '12345', runid = 'P01', ne0_20 = 1E19, Vsurf = 0.0, Zeff = 1.5, Paux_MW = 11.0, times = [0.0,1.0]):
 
         # Produce geqdsk object
         scratch_folder = IOtools.expandPath(folder)
@@ -1198,7 +1203,7 @@ class freegs_millerized:
         self.write(file_scratch)
         g = MITIMgeqdsk(file_scratch)
 
-        return g.to_transp(folder=folder, shot=shot, runid=runid, ne0_20=ne0_20, Vsurf=Vsurf, Zeff=Zeff, PichT_MW=PichT_MW, times=times)
+        return g.to_transp(folder=folder, shot=shot, runid=runid, ne0_20=ne0_20, Vsurf=Vsurf, Zeff=Zeff, Paux_MW=Paux_MW, times=times)
 
 
 def equilibrium_to_profiles(
@@ -1207,8 +1212,12 @@ def equilibrium_to_profiles(
         ne0_20 = 1E19,
         Zeff = 1.5,
         Z = 1,
-        PichT = 10.0
+        Paux = 10.0,
+        aux_channels = None
         ):
+    
+    if aux_channels is None:
+        aux_channels = {'e': 'qrfe(MW/m^3)', 'i': 'qrfi(MW/m^3)', 'total': 'qRF_MW'}
     
     # Ensure positive quantities     #TODO: Check if this is necessary, pass directions
     rhotor = np.array([np.abs(i) for i in rhotor])
@@ -1294,12 +1303,18 @@ def equilibrium_to_profiles(
     # Power: insert parabolic and use PROFILES volume integration to find desired power
     # -------------------------------------------------------------------------------------------------------
 
-    _, profiles["qrfe(MW/m^3)"] = PLASMAtools.parabolicProfile(Tbar=1.0,nu=5.0,rho=rhotor,Tedge=0.0)
+    # What variables are the ones to substitute in input.gacode?
+    channel_e = aux_channels['e']
+    channel_i = aux_channels['i']
+    channel_total = aux_channels['total']
+
+    _, profiles[channel_e] = PLASMAtools.parabolicProfile(Tbar=1.0,nu=5.0,rho=rhotor,Tedge=0.0)
 
     p = PROFILEStools.gacode_state.scratch(profiles)
 
-    p.profiles["qrfe(MW/m^3)"] = p.profiles["qrfe(MW/m^3)"] *  PichT/p.derived['qRF_MW'][-1] /2
-    p.profiles["qrfi(MW/m^3)"] = p.profiles["qrfe(MW/m^3)"]
+
+    p.profiles[channel_e] = p.profiles[channel_e] *  (Paux / p.derived[channel_total][-1]) /2
+    p.profiles[channel_i] = p.profiles[channel_e]
 
     # -------------------------------------------------------------------------------------------------------
     # Ready to go

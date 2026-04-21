@@ -134,9 +134,13 @@ class powerstate:
 
         # Have the posibility of storing profiles in the class
         self.profiles_stored = []
-        self.FluxMatch_Xopt, self.FluxMatch_Yopt = torch.Tensor().to(
-            self.dfT
-        ), torch.Tensor().to(self.dfT)
+        self.FluxMatch_Xopt, self.FluxMatch_Yopt, self.FluxMatch_relax = (
+            torch.Tensor().to(self.dfT),
+            torch.Tensor().to(self.dfT),
+            torch.Tensor().to(self.dfT),
+        )
+        self.FluxMatch_tol       = None   # positive residual threshold (−tol from solver)
+        self.FluxMatch_osc_iters = []     # iterations where oscillation check ran
 
         self.labelsFM = []
         for profile in self.predicted_channels:
@@ -173,7 +177,8 @@ class powerstate:
 
         # Resolution of input.gacode
         if increase_profile_resol:
-            TRANSFORMtools.improve_resolution_profiles(self.profiles, rho_vec)
+            smooth_around_coarsing = self.transport_options.get("flatten_gradients_at_control_points", True)
+            TRANSFORMtools.improve_resolution_profiles(self.profiles, rho_vec, smooth_around_coarsing=smooth_around_coarsing)
 
         # Convert to powerstate
         self.to_powerstate(self)
@@ -365,16 +370,21 @@ class powerstate:
 
         folder_main = solver_options.get("folder", None)
         namingConvention = solver_options.get("namingConvention", "powerstate_sr_ev")
+        # Optional callable `step -> sub-folder name`. Lets the caller lay out folders in a
+        # non-sequential order (e.g. interleaving several parallel simple-relax trajectories
+        # into one step-major sequence). If not provided, the default "{name}_{cont}" is used.
+        folder_namer = solver_options.get("folder_namer", None)
 
         cont = 0
         def evaluator(X, y_history=None, x_history=None, metric_history=None):
 
             nonlocal cont
 
-            nameRun = f"{namingConvention}_{cont}"
+            sub_name = folder_namer(cont) if folder_namer is not None else f"{namingConvention}_{cont}"
+            nameRun = sub_name
 
             if folder_main is not None:
-                folder = IOtools.expandPath(folder_main) /  f"{namingConvention}_{cont}"
+                folder = IOtools.expandPath(folder_main) /  sub_name
                 if issubclass(self.transport_options["evaluator"], TRANSPORTtools.power_transport):
                     (folder / "transport_simulation_folder").mkdir(parents=True, exist_ok=True)
 
@@ -426,14 +436,26 @@ class powerstate:
         x0 = x0.view((self.plasma["rho"].shape[0],(self.plasma["rho"].shape[1] - 1) * len(self.predicted_channels),))
 
         # Optimize
-        x_best,Yopt, Xopt, metric_history = solver_fun(evaluator,x0, bounds=self.bounds_current,solver_options=solver_options)
+        x_best, Yopt, Xopt, metric_history, *extra_ = solver_fun(evaluator,x0, bounds=self.bounds_current,solver_options=solver_options)
+        relax_history   = extra_[0] if len(extra_) > 0 else torch.Tensor()
+        solver_tol      = extra_[1] if len(extra_) > 1 else None
+        osc_check_iters = extra_[2] if len(extra_) > 2 else []
 
         # For simplicity, return the trajectory of only the best candidate
 
         idx_flat = metric_history.argmax()
         index_best = divmod(idx_flat.item(), metric_history.shape[1])
-        
+
         self.FluxMatch_Yopt, self.FluxMatch_Xopt = Yopt[:,index_best[1],:], Xopt[:,index_best[1],:]
+        # Full batched trajectories: (iter, N_batches, dvs) / (iter, N_batches, dimY).
+        # Callers that need per-batch trajectories — e.g. PORTALS parallel simple-relax
+        # initialization which runs one flux_match across N trajectories at once — read
+        # these instead of the scalar-best column above.
+        self.FluxMatch_Xopt_batches = Xopt
+        self.FluxMatch_Yopt_batches = Yopt
+        self.FluxMatch_relax     = relax_history[:, index_best[1], :] if relax_history.numel() > 0 else relax_history
+        self.FluxMatch_tol       = -solver_tol if solver_tol is not None else None   # positive residual threshold
+        self.FluxMatch_osc_iters = osc_check_iters
 
         print("**********************************************************************************************")
         print(f"\t- Flux matching of powerstate finished, and took {IOtools.getTimeDifference(timeBeginning)}\n")
@@ -446,7 +468,7 @@ class powerstate:
     # Plotting tools
     # ------------------------------------------------------------------
 
-    def plot(self, axs=None, axsRes=None, axsMetrics=None, figs=None, fn=None,c="r", label="powerstate", batch_num=0, compare_to_state=None, c_orig = "b"):
+    def plot(self, axs=None, axsRes=None, axsMetrics=None, figs=None, fn=None, c="r", label="powerstate", batch_num=0, compare_to_state=None, c_orig="b", show_stds=False):
         if axs is None:
 
             if fn is None:
@@ -461,11 +483,11 @@ class powerstate:
             figMain = fn.add_figure(label="PowerState", tab_color='r')
             # Optimization
             figOpt = fn.add_figure(label="Optimization", tab_color='r')
-            grid = plt.GridSpec(2, 1+len(self.predicted_channels), hspace=0.3, wspace=0.3)
+            grid = plt.GridSpec(3, 1+len(self.predicted_channels), hspace=0.3, wspace=0.3)
 
             axsRes = [figOpt.add_subplot(grid[:, 0])]
             for i in range(len(self.predicted_channels)):
-                for j in range(2):
+                for j in range(3):
                     axsRes.append(figOpt.add_subplot(grid[j, i+1]))
 
             # Profiles
@@ -484,7 +506,7 @@ class powerstate:
             compare_to_state._detach_tensors()
             powers.append(compare_to_state)
 
-        POWERplot.plot(self, axs, axsRes, figs, c=c, label=label, batch_num=batch_num, compare_to_state=compare_to_state, c_orig = c_orig)
+        POWERplot.plot(self, axs, axsRes, figs, c=c, label=label, batch_num=batch_num, compare_to_state=compare_to_state, c_orig=c_orig, show_stds=show_stds)
 
         if axsMetrics is not None:
             POWERplot.plot_metrics_powerstates(axsMetrics,powers[::-1])
@@ -522,6 +544,9 @@ class powerstate:
 
         if hasattr(self, 'FluxMatch_Yopt') and self.FluxMatch_Yopt is not None and self.FluxMatch_Yopt.requires_grad:
             self.FluxMatch_Yopt = self.FluxMatch_Yopt.detach()
+
+        if hasattr(self, 'FluxMatch_relax') and self.FluxMatch_relax is not None and self.FluxMatch_relax.requires_grad:
+            self.FluxMatch_relax = self.FluxMatch_relax.detach()
 
     def _repeat_tensors(self, batch_size=1, specific_keys=None, positionToUnrepeat=0):
         """
@@ -564,6 +589,8 @@ class powerstate:
             self.Xcurrent = self.Xcurrent.cpu()
         if hasattr(self, 'FluxMatch_Yopt') and self.FluxMatch_Yopt is not None and isinstance(self.FluxMatch_Yopt, torch.Tensor):
             self.FluxMatch_Yopt = self.FluxMatch_Yopt.cpu()
+        if hasattr(self, 'FluxMatch_relax') and self.FluxMatch_relax is not None and isinstance(self.FluxMatch_relax, torch.Tensor):
+            self.FluxMatch_relax = self.FluxMatch_relax.cpu()
         if hasattr(self, 'profiles'):
             self.profiles.toNumpyArrays()
 

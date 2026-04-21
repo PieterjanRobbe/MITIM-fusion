@@ -1,6 +1,7 @@
 import copy
 import numpy as np
 import matplotlib.pyplot as plt
+import concurrent.futures
 from mitim_tools.misc_tools import GRAPHICStools, PLASMAtools, LOGtools, IOtools
 from mitim_modules.powertorch import STATEtools
 from mitim_modules.powertorch.utils import TRANSFORMtools
@@ -22,101 +23,104 @@ def prepare_profiles(
     tesep_eV=75, nesep19=1.0,
     Paux = 0.0,
     scale_zeta=False,   # Trick for now to fix negative jacobians when moving triangularity too much
-    fDT=0.85,           # If Zeff is not None: fDT to mtaintain
-    ion_position=3,     # If Zeff is not None: if (T,D,Z,...), change Z to match Zeff choice
+    fDT=0.85,           # If not None: If Zeff is not None: fDT to mtaintain 
+    ion_position=3,     # If Zeff is not None: if (T,D,Z1,Z2), change Z2 to match Zeff choice
     roatop = 0.9,
     Ttop_keV = 4.0,
     ntop_20 = 1.0,
+    force_fixed_geometry=False, # If True, do not change geometry (R,a,...) and only change profiles; this is useful to analyze the effect of the profiles alone without changing the geometry,
     **kwargs_rederive_geometry
     ):
     
     p = copy.deepcopy(p_base)
 
-    # -------------------------------------------------------
-    # Main quantities
-    # -------------------------------------------------------
+    if not force_fixed_geometry:
 
-    # Change major radius
-    p.profiles['rcentr(m)'][0] = R
-    p.profiles['rmaj(m)'] *= R / p_base.profiles['rmaj(m)'][-1]
+        # -------------------------------------------------------
+        # Main quantities
+        # -------------------------------------------------------
 
-    # Change minor radius
-    p.profiles['rmin(m)'] *= a/p_base.profiles['rmin(m)'][-1]
-    
-    # Change elongation
-    if kappa995 is not None:
-        # If 995 available, use that
-        mutilier_kappa = kappa995/p_base.derived['kappa995']
-    else:
-        # Otherwise, use the separatrix value
-        mutilier_kappa = kappa_sep/p_base.profiles['kappa(-)'][-1]
-    p.profiles['kappa(-)'] *= mutilier_kappa
+        # Change major radius
+        p.profiles['rcentr(m)'][0] = R
+        p.profiles['rmaj(m)'] *= R / p_base.profiles['rmaj(m)'][-1]
 
-    # Change triangularity
-    if delta995 is not None:
-        # If 995 available, use that
-        mutilier_delta = delta995/p_base.derived['delta995']
-    else:
-        # Otherwise, use the separatrix value
-        mutilier_delta = delta_sep/p_base.profiles['delta(-)'][-1]
-    p.profiles['delta(-)'] *= mutilier_delta
-    
-    # Squareness: for now reduce its magnitude proportionally to triangularity change
-    if scale_zeta and mutilier_delta > 1.0:
-        if np.sign(p.profiles['zeta(-)'][-1]) < 0:
-            p.profiles['zeta(-)'] /= mutilier_delta
+        # Change minor radius
+        p.profiles['rmin(m)'] *= a/p_base.profiles['rmin(m)'][-1]
+        
+        # Change elongation
+        if kappa995 is not None:
+            # If 995 available, use that
+            mutilier_kappa = kappa995/p_base.derived['kappa995']
         else:
-            p.profiles['zeta(-)'] *= mutilier_delta
-    
-    # Change magnetic field
-    p.profiles['bcentr(T)'][0] = Bt
-    
-    # Change plasma current
-    p.profiles['current(MA)'][0] = Ip
+            # Otherwise, use the separatrix value
+            mutilier_kappa = kappa_sep/p_base.profiles['kappa(-)'][-1]
+        p.profiles['kappa(-)'] *= mutilier_kappa
 
-    # ---------------------------------------------------
-    # Derived quantities
-    # ---------------------------------------------------
+        # Change triangularity
+        if delta995 is not None:
+            # If 995 available, use that
+            mutilier_delta = delta995/p_base.derived['delta995']
+        else:
+            # Otherwise, use the separatrix value
+            mutilier_delta = delta_sep/p_base.profiles['delta(-)'][-1]
+        p.profiles['delta(-)'] *= mutilier_delta
+        
+        # Squareness: for now reduce its magnitude proportionally to triangularity change
+        if scale_zeta and mutilier_delta > 1.0:
+            if np.sign(p.profiles['zeta(-)'][-1]) < 0:
+                p.profiles['zeta(-)'] /= mutilier_delta
+            else:
+                p.profiles['zeta(-)'] *= mutilier_delta
+        
+        # Change magnetic field
+        p.profiles['bcentr(T)'][0] = Bt
+        
+        # Change plasma current
+        p.profiles['current(MA)'][0] = Ip
 
-    kappa_sep = p.profiles['kappa(-)'][-1]
-    delta_sep = p.profiles['delta(-)'][-1]
+        # ---------------------------------------------------
+        # Derived quantities
+        # ---------------------------------------------------
 
-    # Approximate XS area
-    area_new = np.pi * a**2 * kappa_sep * (1-delta_sep**2/2)
-    area_old = np.pi * p_base.profiles['rmin(m)'][-1]**2 * p_base.profiles['kappa(-)'][-1] * (1-p_base.profiles['delta(-)'][-1]**2/2)
+        kappa_sep = p.profiles['kappa(-)'][-1]
+        delta_sep = p.profiles['delta(-)'][-1]
 
-    # Make sure that q95 is roughly consistent, scale based on the same as qstar_ITER
-    if kappa995 is None:
-        factor_sep_to_95_kappa = p_base.derived['kappa95']/p_base.profiles['kappa(-)'][-1]
-        kappa95 = kappa_sep * factor_sep_to_95_kappa
-    else:
-        factor_995_to_95_kappa = p_base.derived['kappa95']/p_base.derived['kappa995']
-        kappa95 = kappa995 * factor_995_to_95_kappa
-    
-    if delta995 is None:
-        factor_sep_to_95_delta = p_base.derived['delta95']/p_base.profiles['delta(-)'][-1]
-        delta95 = delta_sep * factor_sep_to_95_delta
-    else:
-        factor_995_to_95_delta = p_base.derived['delta95']/p_base.derived['delta995']
-        delta95 = delta995 * factor_995_to_95_delta
-    
-    qstar = PLASMAtools.evaluate_qstar(
-        Ip,
-        R,
-        kappa95,
-        Bt,
-        a/R,
-        delta95,
-        isInputIp=True,
-        ITERcorrection=True,
-        includeShaping=True,
-    )
-    
-    p.profiles['q(-)'] = PLASMAtools.q_profile_scale(p.derived['psi_pol_n'], p.profiles['q(-)'], qstar / p_base.derived['qstar_ITER'])
+        # Approximate XS area
+        area_new = np.pi * a**2 * kappa_sep * (1-delta_sep**2/2)
+        area_old = np.pi * p_base.profiles['rmin(m)'][-1]**2 * p_base.profiles['kappa(-)'][-1] * (1-p_base.profiles['delta(-)'][-1]**2/2)
 
-    # Make sure that toroidal flux is roughly consistent
-    p.profiles['torfluxa(Wb/radian)'] *= ( Bt / p_base.profiles['bcentr(T)'][0] ) * ( area_new / area_old )
-    p.profiles['polflux(Wb/radian)'] *= ( Ip / p_base.profiles['current(MA)'][0] )
+        # Make sure that q95 is roughly consistent, scale based on the same as qstar_ITER
+        if kappa995 is None:
+            factor_sep_to_95_kappa = p_base.derived['kappa95']/p_base.profiles['kappa(-)'][-1]
+            kappa95 = kappa_sep * factor_sep_to_95_kappa
+        else:
+            factor_995_to_95_kappa = p_base.derived['kappa95']/p_base.derived['kappa995']
+            kappa95 = kappa995 * factor_995_to_95_kappa
+        
+        if delta995 is None:
+            factor_sep_to_95_delta = p_base.derived['delta95']/p_base.profiles['delta(-)'][-1]
+            delta95 = delta_sep * factor_sep_to_95_delta
+        else:
+            factor_995_to_95_delta = p_base.derived['delta95']/p_base.derived['delta995']
+            delta95 = delta995 * factor_995_to_95_delta
+        
+        qstar = PLASMAtools.evaluate_qstar(
+            Ip,
+            R,
+            kappa95,
+            Bt,
+            a/R,
+            delta95,
+            isInputIp=True,
+            ITERcorrection=True,
+            includeShaping=True,
+        )
+        
+        p.profiles['q(-)'] = PLASMAtools.q_profile_scale(p.derived['psi_pol_n'], p.profiles['q(-)'], qstar / p_base.derived['qstar_ITER'])
+
+        # Make sure that toroidal flux is roughly consistent
+        p.profiles['torfluxa(Wb/radian)'] *= ( Bt / p_base.profiles['bcentr(T)'][0] ) * ( area_new / area_old )
+        p.profiles['polflux(Wb/radian)'] *= ( Ip / p_base.profiles['current(MA)'][0] )
 
     # -------------------------------------------------------
     # Others
@@ -167,7 +171,7 @@ def prepare_profiles(
 
     # Change Zeff
     if Zeff is not None:
-        p.changeZeff(Zeff, ion_pos=ion_position, keep_fmain=True, fmain_force=fDT)
+        p.changeZeff(Zeff, ion_pos=ion_position, keep_fmain=fDT is not None, fmain_force=fDT)
     
     return p
 
@@ -178,10 +182,11 @@ def rapids_evaluator(nn, core, p_base_orig,
                      thr_beta=0.025,
                      ion_position=3, # if (T,D,Z,...), change Z to match Zeff choice
                      hide_prints=True,  # -> If True, only print warnings and the case flag
-                     optional_flag="RAPIDS case ",  
+                     optional_flag="RAPIDS case ",
                      analyze_distance_to_pb = False,
                      scale_zeta=False, # Trick for now to fix negative jacobians when moving triangularity too much
                      state_resol=None, # If not None, change resolution of the profiles for the state calculation
+                     initial_betan=1.0, # Starting guess for the BetaN loop; warm-starting from a nearby case reduces iterations
                      **kwargs_rederive_geometry):
     '''
     neped in this evaluator is in 1E20 m^-3
@@ -294,7 +299,7 @@ def rapids_evaluator(nn, core, p_base_orig,
         ---------------------------------------------------------------------------------------------------------------------
         '''
         
-        Beta_EPED0 = 1.0 # To start with a reasonable value to avoid breaking the loop with the first pedestal evaluation
+        Beta_EPED0 = initial_betan # Starting guess; warm-starting from a nearby converged case reduces BetaN loop iterations
         minimum_its = 2  # To make sure that at least one iteration of adjustment is done, even if the guessed Beta_EPED0 is close enough
         
         profs, Beta, Beta_EPED, fails = [], [], [], []
@@ -451,7 +456,8 @@ def scan_parameter(
     vertical_at_nominal=True,
     type_plot='full',
     axs=None,
-    state_resol=None
+    state_resol=None,
+    n_jobs=1,   # >1 uses ThreadPoolExecutor (real speedup when NN inference dominates)
     ):
     '''
     axs must be a list of 8 cases if full plot
@@ -478,16 +484,36 @@ def scan_parameter(
     else:
         BetaN_multiplier = 1+p_base.derived['pfast_fraction']
     
-    for i,x in enumerate(results1['x']):
-        values[xparam] = x
-        ptop_kPa,wtop_psipol,profiles_new, eped_evaluation, _ = rapids_evaluator(
-            nn, core,
-            p_base,
+    xs_scan = results1['x']
+    n_scan   = len(xs_scan)
+
+    def _evaluate_one(i, x_val, initial_betan):
+        vals = dict(values)
+        vals[xparam] = x_val
+        return rapids_evaluator(
+            nn, core, p_base,
             Paux=Paux,
-            **values,
+            **vals,
             n_theta_geo=101,
-            optional_flag=f'RAPIDS case {i+1}/{len(results1["x"])}: {xparam}={x:.3f}'
-            )
+            optional_flag=f'RAPIDS case {i+1}/{n_scan}: {xparam}={x_val:.3f}',
+            initial_betan=initial_betan,
+        )
+
+    if n_jobs == 1:
+        # Sequential: carry over converged betan as warm start for the next point
+        eval_results = []
+        next_betan = 1.0
+        for i, x_val in enumerate(xs_scan):
+            res = _evaluate_one(i, x_val, initial_betan=next_betan)
+            eval_results.append(res)
+            next_betan = res[3].get('betan', 1.0)  # eped_evaluation['betan'] from converged point
+    else:
+        # Parallel: all points run concurrently; no betan carry-over (points are independent)
+        with concurrent.futures.ThreadPoolExecutor(max_workers=n_jobs) as pool:
+            futures = [pool.submit(_evaluate_one, i, x_val, 1.0) for i, x_val in enumerate(xs_scan)]
+            eval_results = [f.result() for f in futures]
+
+    for ptop_kPa, wtop_psipol, profiles_new, eped_evaluation, _ in eval_results:
         results1['profs'].append(profiles_new)
         results1['Ptop'].append(ptop_kPa)
         results1['wtop_psipol'] = wtop_psipol

@@ -4,7 +4,7 @@ from mitim_tools.misc_tools import GUItools
 from mitim_tools import __mitimroot__
 
 cold_start = True
-save_figures = True # if True, do not show the plot to screen, save to subfolder instead (good to test in non-interactive HPC)
+save_figures = False # if True, do not show the plot to screen, save to subfolder instead (good to test in non-interactive HPC)
 
 gacode_file = __mitimroot__ / "tests" / "data" / "input.gacode"
 folder = __mitimroot__ / "tests" / "scratch" / "cgyro_test"
@@ -31,8 +31,8 @@ cgyro.run(
         'KY':0.5,
         'MAX_TIME': 10.0, # Short, I just want to test the run. Enough to get the restart file
     },
-    slurm_setup={
-        'cores':16, # Each CGYRO instance (each radius will have this number of cores or gpus)
+    allocation={
+        'resources_per_call': 16, # Each CGYRO instance (each radius will have this number of cores or gpus)
         'minutes': 10,
         },
     cold_start=cold_start,
@@ -61,8 +61,8 @@ cgyro.run_scan(
     variable='KY',
     varUpDown=[0.3,0.4],
     relativeChanges=False,
-    slurm_setup={
-        'cores':16,
+    allocation={
+        'resources_per_call': 16,
         'minutes': 10,
         },
     cold_start=cold_start,
@@ -96,8 +96,8 @@ cgyro.run(
         'COLLISION_MODEL': 5,
         'ROTATION_MODEL': 1,
     },
-    slurm_setup={
-        'cores':16, # Each CGYRO instance (each radius will have this number of cores or gpus)
+    allocation={
+        'resources_per_call': 16, # Each CGYRO instance (each radius will have this number of cores or gpus)
         'minutes': 10,
         },
     cold_start=cold_start,
@@ -106,6 +106,45 @@ cgyro.run(
     )
 
 cgyro.read(label="cgyro2")
+
+# ---------------------------------------------------------------------------
+# Nonlinear with automatic BOX_SIZE / N_RADIAL via preprocess_options
+# (run_type='prep' so no SLURM submission: we only check the input files)
+# ---------------------------------------------------------------------------
+
+cgyro.run(
+    'Nonlinear_preprocessed',
+    code_settings="Nonlinear",
+    extraOptions={
+        'MAX_TIME': 10.0,
+    },
+    preprocess_options={
+        'ky_min': 0.3,
+        'L_x': 90,
+        'N_radial': 256,
+    },
+    allocation={'resources_per_call': 16, 'minutes': 10},
+    cold_start=cold_start,
+    forceIfcold_start=True,
+    run_type='prep',
+)
+
+for rho in cgyro.rhos:
+    input_file = cgyro.FolderSimLast / f'input.cgyro_{rho:.4f}'
+    with open(input_file, 'r') as f:
+        txt = f.read()
+    parsed = {}
+    for line in txt.splitlines():
+        if '=' in line and not line.strip().startswith('#'):
+            k, v = line.split('=', 1)
+            parsed[k.strip()] = v.strip().split()[0]
+    box_size = int(parsed['BOX_SIZE'])
+    n_radial = int(parsed['N_RADIAL'])
+    assert n_radial % 2 == 0, f"N_RADIAL={n_radial} must be even"
+    assert n_radial % box_size == 0, (
+        f"N_RADIAL={n_radial} must be divisible by BOX_SIZE={box_size}"
+    )
+    print(f"[preprocess test] rho={rho}: BOX_SIZE={box_size} N_RADIAL={n_radial}")
 
 # ---------------------------------------------------------------------------
 # Plotting

@@ -49,8 +49,8 @@ def main():
                         help="If provided, it will only plot the specified beats (e.g., transp)")
     parser.add_argument("--full", required=False, default=False, action="store_true",
                         help="If set, it will plot the full beat information.")
-    parser.add_argument("--save", type=str, required=False, default=None,
-                        help="Folder to save the figures.")
+    parser.add_argument("--save", type=str, nargs="?", const="figs", required=False, default=None,
+                        help="Folder to save the figures. If flag given without a value, defaults to 'figs'. Implies --noshow.")
     parser.add_argument("--dpi", type=int, required=False, default=120,
                         help="DPI to save the figures.")
     parser.add_argument("--noshow", required=False, default=False, action="store_true",
@@ -70,13 +70,17 @@ def main():
 
     args = parser.parse_args()
 
+    # --save implies --noshow (headless save; no point re-rendering on screen).
+    if args.save is not None:
+        args.noshow = True
+
     # --------------------------------------------------------------------------------------------------------------------------------------------
     # Retrieve from remote
     # --------------------------------------------------------------------------------------------------------------------------------------------
 
     only_folder_structure_with_files = None
     if args.remote_minimal:
-       only_folder_structure_with_files = ["beat_results/input.gacode", "input.gacode_final","initializer_geqdsk/input.gacode", "timing.jsonl"]
+       only_folder_structure_with_files = ["beat_results/input.gacode", "input.gacode_final","initializer_geqdsk/input.gacode", "timing.jsonl", "maestro.namelist.actual.yaml"]
             
     folders = remote_tools.retrieve_remote_folders(args.folders, args.remote, args.remote_folder_parent, args.remote_folders, only_folder_structure_with_files)
 
@@ -94,6 +98,10 @@ def main():
     beats = args.beats if not args.remote_minimal else 0
     only = args.only
     full = args.full
+
+    # If a single "*" is given, expand to all subdirectories of the current directory
+    if folders == ["*"]:
+        folders = sorted([str(p) for p in Path.cwd().iterdir() if p.is_dir()])
 
     folders = [IOtools.expandPath(folder) for folder in folders]
     
@@ -118,10 +126,14 @@ def main():
         )
         
         fig = fn.add_figure(label='MAESTRO timings ALL', tab_color=4)
-        axsTiming = fig.subplot_mosaic("""
-                                       A
-                                       B
-                                       """,sharex=True)
+        gs  = fig.add_gridspec(2, 2, width_ratios=[2, 1], hspace=0.35, wspace=0.35)
+        ax_tA = fig.add_subplot(gs[0, 0])
+        ax_tB = fig.add_subplot(gs[1, 0], sharex=ax_tA)
+        ax_tC = fig.add_subplot(gs[0, 1])
+        ax_tD = fig.add_subplot(gs[1, 1])
+        ax_tC.set_title("Time per Beat", fontsize=9)
+        ax_tD.set_title("Total by type", fontsize=9)
+        axsTiming = {'A': ax_tA, 'B': ax_tB, 'C': ax_tC, 'D': ax_tD}
         
         colors = GRAPHICStools.listColors()
             
@@ -138,7 +150,7 @@ def main():
         if len(folders) > 1:
             MAESTROplot.plot_special_quantities(ps, ps_lab, axsAll, color=colors[i], label = f'Case #{i}', legYN = i==0)
             if (m.folder_performance / 'timing.jsonl').exists():
-                x0, scripts0 = IOtools.plot_timings(m.folder_performance / 'timing.jsonl', axs = axsTiming, label = f'Case #{i}', color=colors[i])
+                x0, scripts0 = IOtools.plot_timings(m.folder_performance / 'timing.jsonl', axs = [axsTiming['A'], axsTiming['B']], ax_summary=axsTiming['C'], ax_total=axsTiming['D'], label = f'Case #{i}', color=colors[i])
     
         # Only keep the longest
         if len(x0) > len(x):
@@ -160,6 +172,8 @@ def main():
             axsTiming[let].set_xlim(left=0)
             axsTiming[let].set_ylim(bottom=0)
             axsTiming[let].set_xticks(x, scripts, rotation=10, ha="right", fontsize=8)
+        axsTiming['C'].set_ylim(bottom=0)
+        axsTiming['D'].set_ylim(bottom=0)
 
     if not noshow:
         fn.show()

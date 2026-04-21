@@ -69,6 +69,12 @@ class mitim_job:
         self.jobid = None
         self.log_simulation_file = log_simulation_file
 
+        # Populated in prep() for the submit path and in load_submission_state()
+        # for the re-attach path. Initialised here so retrieve() can read it
+        # unconditionally even on job instances that bypass prep() entirely
+        # (e.g. mitim_job.check() builds a temporary retrieve for squeue output).
+        self.output_file_fallbacks = {}
+
     def define_machine(
         self,
         code,
@@ -85,26 +91,36 @@ class mitim_job:
             self.launchSlurm = False
             print("\t- slurm requested but no slurm setup to this machine in config... not doing slurm",typeMsg="i",)
 
-        # Print Slurm info
+        # Print Slurm info — one header line + one compact key=value line.
         if self.launchSlurm:
-            print("\t- Slurm Settings:")
-            print("\t\t- Job settings (different than MITIM default):")
-            for key in self.slurm_settings:
-                if self.slurm_settings[key] is not None:
-                    print(f"\t\t\t- {key}: {self.slurm_settings[key]}")
-            print("\t\t- Partition settings:")
-            print(f'\t\t\t- machine: {self.machineSettings["machine"]}')
-            print(f'\t\t\t- username: {self.machineSettings["user"]}')
-            for key in self.machineSettings["slurm"]:
-                print(f'\t\t\t- {key}: {self.machineSettings["slurm"][key]}')
+            host = f'{self.machineSettings["user"]}@{self.machineSettings["machine"]}'
+            partition = (self.machineSettings.get("slurm") or {}).get("partition", "?")
+            job = self.slurm_settings.get("job-name", "mitim_job")
+            print(f"\t- SLURM: {job} @ {host}:{partition}")
+
+            parts = []
+            _skip = {"job-name"}  # already in the header
+            for k, v in self.slurm_settings.items():
+                if k in _skip or v is None or v is False:
+                    continue
+                parts.append(f"{k}={v}")
+            for k in ("qos", "account", "constraint", "exclusive", "exclude"):
+                v = (self.machineSettings.get("slurm") or {}).get(k)
+                if v is None or v is False:
+                    continue
+                parts.append(f"{k}={'yes' if v is True else v}")
+            if parts:
+                print("\t\t" + "  ".join(parts))
+        else:
+            print(f"\t- Bash (no SLURM) on {self.machineSettings['machine']}")
 
     def define_machine_quick(self, code, nameScratch, slurm_settings=None):
 
         self.slurm_settings = slurm_settings if slurm_settings is not None else {}
-        
-        # In case there's no name, I need it
-        self.slurm_settings.setdefault("name", "mitim_job")
-        
+
+        # In case there's no job name, ensure one (native sbatch key)
+        self.slurm_settings.setdefault("job-name", "mitim_job")
+
         self.machineSettings = CONFIGread.machineSettings(
             code=code,
             nameScratch=nameScratch,
@@ -112,6 +128,10 @@ class mitim_job:
         )
         # Left as string due to potentially referencing a remote file system
         self.folderExecution = self.machineSettings["folderWork"]
+        # In-place local execution: no scratch staging, runs directly in folder_local
+        self.run_in_place = bool(self.machineSettings.get("run_in_place", False))
+        if self.run_in_place:
+            print("\t- In-place local execution: folderExecution == folder_local (no scratch staging)")
 
     @staticmethod
     def grab_machine_settings(code):
@@ -126,6 +146,7 @@ class mitim_job:
         output_folders=None,
         check_files_in_folder={},
         output_folders_selective={},  # New parameter for selective folder content
+        output_file_fallbacks=None,  # {primary_basename: fallback_basename} for retrieve() remote prune
         shellPreCommands=None,
         shellPostCommands=None,
         label_log_files="",
@@ -141,6 +162,15 @@ class mitim_job:
         output_folders_selective is a dictionary with folder name as key and list of specific files/patterns to include as value.
             e.g., {'results': ['*.dat', '*.log'], 'plots': ['figure1.png']}
 
+        output_file_fallbacks maps primary basename -> fallback basename. Before
+        the tarball is built, retrieve() runs one remote bash snippet per
+        folder in output_folders_selective that contains the primary: if the
+        primary is absent but the fallback is present, the fallback is renamed
+        to the primary; if both are present, the fallback is removed. This
+        lets us pull exactly one file per pair (cheap transfer) while still
+        picking up the fallback when the primary write didn't land (e.g. a
+        CGYRO restart that only left bin.cgyro.restart.old behind after a
+        timeout mid-rename).
         """
 
         # Pass to class
@@ -160,6 +190,7 @@ class mitim_job:
         self.label_log_files = label_log_files
 
         self.output_folders_selective = output_folders_selective if isinstance(output_folders_selective, dict) else {}
+        self.output_file_fallbacks = output_file_fallbacks if isinstance(output_file_fallbacks, dict) else {}
 
     def run(
             self,
@@ -279,12 +310,15 @@ class mitim_job:
         self.connect(log_file=self.folder_local / "paramiko.log")
 
         # ~~~~~~ Prepare scratch folder
-        if removeScratchFolders_goingIn:
-            self.remove_scratch_folder()
-        self.create_scratch_folder()
+        if not self.run_in_place:
+            if removeScratchFolders_goingIn:
+                self.remove_scratch_folder()
+            self.create_scratch_folder()
 
-        # ~~~~~~ Send
-        self.send()
+            # ~~~~~~ Send
+            self.send()
+        else:
+            print("\t* In-place local execution: skipping scratch setup and file staging")
 
         # ~~~~~~ Execute
         execution_counter = 0
@@ -319,8 +353,8 @@ class mitim_job:
 
         # ~~~~~~ Remove scratch folder
         if received:
-            
-            if wait_for_all_commands and removeScratchFolders_goingOut:
+
+            if wait_for_all_commands and removeScratchFolders_goingOut and not self.run_in_place:
                 self.remove_scratch_folder()
                 
         else:
@@ -491,6 +525,9 @@ class mitim_job:
                         self.key_filename = None
 
     def create_scratch_folder(self):
+        if getattr(self, "run_in_place", False):
+            return None, None
+
         print(f'\t* Creating{" remote" if self.ssh is not None else ""} folder:')
         print(f"\t\t{self.folderExecution}")
 
@@ -501,6 +538,9 @@ class mitim_job:
         return output, error
 
     def send(self):
+        if getattr(self, "run_in_place", False):
+            return
+
         print(f'\t* Sending files{" to remote server" if self.ssh is not None else ""}:')
 
         # Create a tarball of the local directory
@@ -576,7 +616,13 @@ class mitim_job:
         lines = []
         lines.append("==================== MITIM Simulation Execution Log ====================\n")
         lines.append(f"Date (finished): {now}")
-        lines.append(f"Execution Type: {'Remote' if is_remote else 'Local'}\n")
+        if is_remote:
+            exec_type = "Remote"
+        elif getattr(self, "run_in_place", False):
+            exec_type = "Local (in-place)"
+        else:
+            exec_type = "Local"
+        lines.append(f"Execution Type: {exec_type}\n")
         lines.append("--- Execution Details ---")
         if is_remote:
             lines.append(f"SSH User: {getattr(self, 'target_user', 'N/A')}")
@@ -670,12 +716,30 @@ class mitim_job:
 
         return output, error
 
-    def retrieve(self, check_if_files_received=True, check_files_in_folder={}):
+    def retrieve(self, check_if_files_received=True, check_files_in_folder={}, optional_files=None):
+        '''
+        optional_files: files that we still try to pull from the remote (added
+        to the tarball and unlinked locally before retrieval like the mandatory
+        ones) but which are NOT flagged as "not received" when absent — used by
+        `check()` for the slurm-job log, which does not exist yet while the job
+        is PENDING and shouldn't cause a 60s retry on every status poll.
+        '''
+        optional_files = list(optional_files) if optional_files else []
+
+        if getattr(self, "run_in_place", False):
+            print("\t* In-place local execution: outputs already in folder_local (skipping retrieval)")
+            if check_if_files_received:
+                received = self.check_all_received(check_files_in_folder=check_files_in_folder)
+                if received:
+                    print("\t\t- All correct", typeMsg="i")
+                return received
+            return True
+
         print(f'\t* Retrieving files{" from remote server" if self.ssh is not None else ""}:')
 
         # Create a tarball of the output files & folders on the remote machine
         print("\t\t- Removing local output files & folders that potentially exist from previous runs")
-        for file in self.output_files:
+        for file in list(self.output_files) + optional_files:
             (self.folder_local / file).unlink(missing_ok=True)
         for folder in self.output_folders:
             if (self.folder_local / folder).exists():
@@ -684,11 +748,37 @@ class mitim_job:
         # Create a tarball of the output files & folders on the remote machine
         print("\t\t- Tarballing (remote side)")
 
+        # Remote-side primary/fallback resolution BEFORE the tar, so we only
+        # ever tar & transfer one file per pair (the fallback is typically
+        # same-order-of-magnitude size as the primary — no point paying
+        # double when we only want one). Per (folder, primary, fallback):
+        #   primary present    -> remove fallback (dedup + free remote disk)
+        #   fallback only      -> rename fallback to primary
+        #   neither present    -> no-op
+        # Idempotent and safe if the folders don't exist yet.
+        if self.output_file_fallbacks:
+            fallback_lines = []
+            for folder, patterns in self.output_folders_selective.items():
+                pattern_set = set(patterns)
+                for primary, fallback in self.output_file_fallbacks.items():
+                    if primary not in pattern_set:
+                        continue
+                    p = f"{self.folderExecution}/{folder}/{primary}"
+                    f = f"{self.folderExecution}/{folder}/{fallback}"
+                    fallback_lines.append(
+                        f'if [ -f "{p}" ]; then rm -f "{f}"; '
+                        f'elif [ -f "{f}" ]; then mv "{f}" "{p}"; fi'
+                    )
+            if fallback_lines:
+                print(f"\t\t- Resolving {len(fallback_lines)} primary/fallback pair(s) on remote")
+                self.execute(" ; ".join(fallback_lines))
+
         # Build tar command with selective folder content
         tar_items = []
 
-        # Add all output files
+        # Add all output files (mandatory + best-effort)
         tar_items.extend(self.output_files)
+        tar_items.extend(optional_files)
 
         # Add folders - either full folders or selective content
         for folder in self.output_folders:
@@ -751,7 +841,7 @@ class mitim_job:
             else:
                 print(f"\t* Not all received, trying retrieval once again after waiting {time_wait} seconds", typeMsg="i")
                 time.sleep(time_wait)
-                _ = self.retrieve(check_if_files_received=False)
+                _ = self.retrieve(check_if_files_received=False, optional_files=optional_files)
                 received = self.check_all_received(check_files_in_folder=check_files_in_folder)
         else:
             received = True
@@ -759,6 +849,11 @@ class mitim_job:
         return received
 
     def remove_scratch_folder(self):
+        # Safety guard: never rm -rf the user's working directory in in-place mode
+        if getattr(self, "run_in_place", False):
+            print("\t* Skipping scratch-folder removal (in-place local execution)")
+            return None, None
+
         print(f'\t* Removing{" remote" if self.ssh is not None else ""} folder')
 
         output, error = self.execute(f"rm -rf {self.folderExecution}")
@@ -805,15 +900,18 @@ class mitim_job:
         else:
             wasThere = False
 
-        self.output_files = [
-            file_output,  # The slurm results of the main job!
-            "squeue_output.dat",  # The output of the squeue command
-        ]
+        # Only squeue_output.dat is mandatory — it is what interpret_status()
+        # parses. The slurm job log (`file_output`) is best-effort: it does not
+        # exist on the remote while the job is still PENDING, and its absence
+        # simply means `interpret_status` sets `self.log_file = None`. Marking
+        # it optional avoids a spurious "File not received" warning plus a 60s
+        # retry on every status poll while the job is queued.
+        self.output_files = ["squeue_output.dat"]
         self.output_folders = []
 
         self.connect()
         output, error = self.execute(command, printYN=True)
-        received = self.retrieve()
+        received = self.retrieve(optional_files=[file_output])
         if not received:
             self._write_debugging_files(output, error, extra_name = '_check')
         self.close()
@@ -1123,18 +1221,21 @@ def create_slurm_execution_files(
     if slurm_settings is None:
         slurm_settings = {}
 
-    nameJob = slurm_settings.setdefault("name", "mitim_job")
-    minutes = int(slurm_settings.setdefault("minutes", 10))
-    memory_req_by_job = slurm_settings.setdefault("memory_req_by_job", None)
+    # ---- Native sbatch keys (the only schema we support) -----------------
+    nameJob         = slurm_settings.setdefault("job-name", "mitim_job")
+    time_com        = slurm_settings.setdefault("time", "10:00")
+    memory_req_by_job = slurm_settings.setdefault("mem", None)
 
-    nodes = slurm_settings.setdefault("nodes", None)
-    ntasks = slurm_settings.setdefault("ntasks", None)
-    cpuspertask = slurm_settings.setdefault("cpuspertask", None)
-    ntaskspernode = slurm_settings.setdefault("ntaskspernode", None)
-    gpuspertask = slurm_settings.setdefault("gpuspertask", None)
+    nodes           = slurm_settings.setdefault("nodes", None)
+    ntasks          = slurm_settings.setdefault("ntasks", None)
+    cpuspertask     = slurm_settings.setdefault("cpus-per-task", None)
+    ntaskspernode   = slurm_settings.setdefault("ntasks-per-node", None)
+    gpuspertask     = slurm_settings.setdefault("gpus-per-task", None)
+    gpuspernode     = slurm_settings.setdefault("gpus-per-node", None)
 
-    job_array = slurm_settings.setdefault("job_array", None)
-    job_array_limit = slurm_settings.setdefault("job_array_limit", None)
+    job_array       = slurm_settings.setdefault("array", None)
+    job_array_limit = slurm_settings.setdefault("array_limit", None)
+    job_exclusive   = slurm_settings.setdefault("exclusive", False)
 
     # ---------------------------------------------------
     # slurm_allocation indicate the machine specifications as given by the config instead of individual job
@@ -1161,12 +1262,8 @@ def create_slurm_execution_files(
             print(f"\t\t- Memory requested by config file ({memory_req_by_config})", typeMsg="i")
         memory_req =  memory_req_by_config
     
-    if minutes >= 60:
-        hours = minutes // 60
-        minutes = minutes - hours * 60
-        time_com = f"{str(hours).zfill(2)}:{str(minutes).zfill(2)}:00"
-    else:
-        time_com = f"{str(minutes).zfill(2)}:00"
+    # `time_com` is already a formatted sbatch --time string (set above
+    # from the native 'time' key or migrated from legacy 'minutes').
 
     """
 	********************************************************************************************
@@ -1204,7 +1301,11 @@ def create_slurm_execution_files(
         commandSBATCH.append(f"#SBATCH --mem {memory_req}")
     if job_array is not None:
         commandSBATCH.append(f"#SBATCH --array={job_array}{f'%{job_array_limit} ' if job_array_limit is not None else ''}")
-    elif request_exclusive_node:
+    # --exclusive can co-exist with arrays (one whole node per array element)
+    # and with packed jobs (whole nodes via per-job slurm_settings). Honor
+    # both the machine config (`slurm_allocation`) and the per-job override
+    # (`slurm_settings.exclusive`).
+    if request_exclusive_node or job_exclusive:
         commandSBATCH.append("#SBATCH --exclusive")
     if nodes is not None:
         commandSBATCH.append(f"#SBATCH --nodes {nodes}")
@@ -1216,6 +1317,8 @@ def create_slurm_execution_files(
         commandSBATCH.append(f"#SBATCH --cpus-per-task {cpuspertask}")
     if gpuspertask is not None:
         commandSBATCH.append(f"#SBATCH --gpus-per-task {gpuspertask}")
+    if gpuspernode is not None:
+        commandSBATCH.append(f"#SBATCH --gpus-per-node={gpuspernode}")
     if exclude is not None:
         commandSBATCH.append(f"#SBATCH --exclude={exclude}")
 
@@ -1225,6 +1328,8 @@ def create_slurm_execution_files(
     # ~~~~ Commands ~~~~~~~~~~~~~~~
     commandSBATCH.append("")
     commandSBATCH.append("export SRUN_CPUS_PER_TASK=$SLURM_CPUS_PER_TASK")
+    if gpuspernode is not None:
+        commandSBATCH.append('export SLURM_CPU_BIND="cores"')
     commandSBATCH.append('echo "MITIM: Submitting SLURM job $SLURM_JOBID in $HOSTNAME (host: $SLURM_SUBMIT_HOST)"')
     commandSBATCH.append('echo "MITIM: Nodes have $SLURM_CPUS_ON_NODE cores and $SLURM_JOB_NUM_NODES node(s) were allocated for this job"')
     commandSBATCH.append('echo "MITIM: Each of the $SLURM_NTASKS tasks allocated will run with $SLURM_CPUS_PER_TASK cores, allocating $SRUN_CPUS_PER_TASK CPUs per srun"')
@@ -1352,6 +1457,7 @@ def perform_quick_remote_execution(
     job.slurm_settings, job.launchSlurm = {}, False
     job.machineSettings = CONFIGread.machineSettings(code=None,nameScratch=job_name,forceMachine=machine,append_folder_local=folder_local)
     job.folderExecution = job.machineSettings["folderWork"]
+    job.run_in_place = bool(job.machineSettings.get("run_in_place", False))
 
     # Submit
     job.prep(
