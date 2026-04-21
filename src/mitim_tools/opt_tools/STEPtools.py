@@ -105,6 +105,24 @@ class OPTstep:
         # **** From standard deviation to variance
         self.train_Yvar = self.train_Ystd**2
 
+        self._validate_acquisition_settings()
+
+    def _validate_acquisition_settings(self):
+        if self.acquisition_type != "knowledge_gradient":
+            return
+
+        points_per_step = int(self.stepSettings["optimization_options"]["acquisition_options"]["points_per_step"])
+        if points_per_step != 1:
+            raise ValueError(
+                "[MITIM] acquisition_options.type='knowledge_gradient' requires acquisition_options.points_per_step = 1"
+            )
+
+        optimizer_names = list(self.optimizers.keys())
+        if optimizer_names != ["botorch"]:
+            raise ValueError(
+                "[MITIM] acquisition_options.type='knowledge_gradient' requires acquisition_options.optimizers = ['botorch']"
+            )
+
     def fit_step(self, avoidPoints=None, fitWithTrainingDataIfContains=None):
         """
         Notes:
@@ -318,6 +336,23 @@ class OPTstep:
         """
 
         self.evaluators = {"GP": self.GP["combined_model"]}
+        optimization_bounds = torch.zeros((2, len(self.evaluators["GP"].bounds))).to(
+            self.evaluators["GP"].train_X
+        )
+        for i, ikey in enumerate(self.evaluators["GP"].bounds):
+            optimization_bounds[0, i] = self.evaluators["GP"].bounds[ikey][0]
+            optimization_bounds[1, i] = self.evaluators["GP"].bounds[ikey][1]
+        self.acquisition_metadata = {
+            "acquisition_kind": self.acquisition_type,
+            "optimizes_terminal_points": False,
+            "q_candidates": 1,
+            "num_fantasies": 0,
+            "current_value": None,
+            "summary_label": self.acquisition_type,
+            "summary_is_current_value_adjusted": False,
+            "has_terminal_diagnostics": False,
+            "terminal_diagnostics_status": "not_applicable",
+        }
 
         # **************************************************************************************************
         # Objective (multi-objective model -> single objective residual)
@@ -369,7 +404,12 @@ class OPTstep:
         # Monte Carlo acquisition functions
         # >>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>
         
-        sampler = botorch.sampling.normal.SobolQMCNormalSampler(torch.Size([self.acquisition_params["mc_samples"]]))
+        mc_samples = self.acquisition_params.get("mc_samples", 1024)
+        sampler_seed = self.currentIteration if self.acquisition_params.get("use_fixed_base_samples", True) else None
+        sampler = botorch.sampling.normal.SobolQMCNormalSampler(
+            torch.Size([mc_samples]), seed=sampler_seed
+        )
+        summary_acq_function = None
 
         if self.acquisition_type == "simple_regret_mc": # Former posterior_mean_mc
             self.evaluators["acq_function"] = (
@@ -410,9 +450,65 @@ class OPTstep:
                 )
             )
 
+        elif self.acquisition_type == "knowledge_gradient":
+            summary_acq_function = BOTORCHtools.PosteriorMean(
+                self.evaluators["GP"].gpmodel,
+                objective=self.evaluators["objective"],
+            )
+            num_fantasies = self.acquisition_params.get("num_fantasies", 64)
+
+            current_value_num_restarts = self.acquisition_params.get("current_value_num_restarts", 16)
+            current_value_raw_samples = self.acquisition_params.get("current_value_raw_samples", 256)
+            current_value_x, current_value = botorch.optim.optimize_acqf(
+                acq_function=summary_acq_function,
+                bounds=optimization_bounds,
+                q=1,
+                sequential=True,
+                num_restarts=current_value_num_restarts,
+                raw_samples=current_value_raw_samples,
+                options={"seed": self.currentIteration},
+            )
+            current_value = current_value.detach().reshape(-1)[0]
+
+            fantasy_sampler = botorch.sampling.normal.SobolQMCNormalSampler(
+                torch.Size([num_fantasies]), seed=sampler_seed
+            )
+            inner_sampler_seed = (None if sampler_seed is None else sampler_seed + 1)
+            inner_sampler = botorch.sampling.normal.SobolQMCNormalSampler(
+                torch.Size([mc_samples]), seed=inner_sampler_seed
+            )
+
+            self.evaluators["acq_function"] = botorch.acquisition.knowledge_gradient.qKnowledgeGradient(
+                self.evaluators["GP"].gpmodel,
+                num_fantasies=num_fantasies,
+                sampler=fantasy_sampler,
+                inner_sampler=inner_sampler,
+                objective=self.evaluators["objective"],
+                current_value=current_value,
+            )
+
+            self.acquisition_metadata.update(
+                {
+                    "optimizes_terminal_points": True,
+                    "num_fantasies": num_fantasies,
+                    "current_value": float(current_value.cpu().item()),
+                    "summary_label": "posterior_mean baseline",
+                    "summary_is_current_value_adjusted": True,
+                    "current_value_x": current_value_x.detach().cpu().numpy(),
+                    "terminal_diagnostics_status": "pending_capture",
+                }
+            )
+
         # Add this because of the way train_X is defined within the gpmodel, which is fundamental, but the acquisition for sample
         # around best, needs the raw one! (for noisy it is automatic)
-        self.evaluators["acq_function"]._X_baseline = self.evaluators["GP"].train_X #TOFIX
+        if hasattr(self.evaluators["acq_function"], "_X_baseline"):
+            self.evaluators["acq_function"]._X_baseline = self.evaluators["GP"].train_X #TOFIX
+
+        if summary_acq_function is None:
+            summary_acq_function = self.evaluators["acq_function"]
+
+        self.evaluators["acq_function_summary"] = summary_acq_function
+        self.evaluators["acquisition_metadata"] = self.acquisition_metadata
 
         # **************************************************************************************************
         # Selector (Takes x and residuals of optimized points, and provides the indices for organization)

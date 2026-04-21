@@ -9,6 +9,19 @@ from mitim_tools.misc_tools import IOtools, MATHtools, GRAPHICStools
 from mitim_tools.misc_tools.LOGtools import printMsg as print
 from IPython import embed
 
+
+def evaluate_acquisition_for_summary(fun, x):
+    if x is None:
+        return None
+
+    if x.nelement() == 0:
+        return torch.Tensor([]).to(fun.stepSettings["dfT"])
+
+    acq_function = fun.evaluators.get(
+        "acq_function_summary", fun.evaluators["acq_function"]
+    )
+    return acq_function(x.unsqueeze(1)).detach()
+
 class fun_optimization:
     def __init__(self, stepSettings, evaluators, strategy_options):
         self.stepSettings = stepSettings
@@ -124,10 +137,10 @@ class fun_optimization:
         """
 
         # ** OPTIMIZE **
-        x_opt2, y_opt_residual2, z_opt2, acq_evaluated = method_for_optimization(self, optimization_params = method_parameters, writeTrajectory=True)
+        x_opt2, y_opt_residual2, z_opt2, optimization_trace = method_for_optimization(self, optimization_params = method_parameters, writeTrajectory=True)
         # **********************************************************************
 
-        info = storeInfo(x_opt2, acq_evaluated, self)
+        info = storeInfo(x_opt2, optimization_trace, self)
 
         # ----------------------------------------------------------------
         # Concatenate to previous solutions, check within bounds and order
@@ -549,7 +562,7 @@ def pointsOperation_random(
         print(f"\t- Filling space with {best_points} random (LHS) points becaue optimization method found none")
         draw_bounds = fun.bounds
         x_opt = SAMPLINGtools.LHS(best_points, draw_bounds, seed=randomSeed)
-        y_opt_residual = evaluators["acq_function"](x_opt.unsqueeze(1)).detach()
+        y_opt_residual = evaluate_acquisition_for_summary(fun, x_opt)
         z_opt = torch.ones(x_opt.shape[0]) * 2
 
     elif RandomRangeBounds > 0:
@@ -571,7 +584,7 @@ def pointsOperation_random(
             )
 
             new_opt = SAMPLINGtools.LHS(best_points - x_optRandom.shape[0], draw_bounds, seed=randomSeed)
-            new_y = evaluators["acq_function"](new_opt.unsqueeze(1)).detach()
+            new_y = evaluate_acquisition_for_summary(fun, new_opt)
             x_optRandom = torch.cat((x_optRandom, new_opt)).to(stepSettings["dfT"])
             y_optRandom = torch.cat((y_optRandom, new_y)).to(stepSettings["dfT"])
             new_z = torch.ones(x_optRandom.shape[0]).to(stepSettings["dfT"]) * 2
@@ -657,7 +670,7 @@ def cleanupCandidateSet(
     return x_opt, y_opt, y_opt_residual, z_opt
 
 
-def storeInfo(x_opt, acq_evaluated, fun):
+def storeInfo(x_opt, optimization_trace, fun):
     """
     x:      DVs
     y_res:  Residue used in optimization
@@ -670,6 +683,11 @@ def storeInfo(x_opt, acq_evaluated, fun):
     """
 
     infoOPT = {}
+    trace_info = (
+        optimization_trace
+        if isinstance(optimization_trace, dict)
+        else {"acq_evaluated": optimization_trace}
+    )
 
     x_ini = fun.xGuesses
 
@@ -678,10 +696,14 @@ def storeInfo(x_opt, acq_evaluated, fun):
     y, y1, y2, _ = fun.evaluators["residual_function"](x_ini, outputComponents=True)
 
     infoOPT["x_start"] = copy.deepcopy(x_ini.cpu().numpy())
+    infoOPT["x_start_full"] = copy.deepcopy(
+        trace_info.get("x_start_full", x_ini).detach().cpu().numpy()
+    )
     infoOPT["y_res_start"] = copy.deepcopy(y_ini_res.cpu().numpy())
     infoOPT["yFun_start"] = copy.deepcopy(y1.detach().cpu().numpy())
     infoOPT["yCal_start"] = copy.deepcopy(y2.detach().cpu().numpy())
     infoOPT["y_start"] = copy.deepcopy(y.detach().cpu().numpy())
+    infoOPT["has_end_state"] = bool(x_opt.shape[0] > 0)
 
     # End
     if x_opt.shape[0] > 0:
@@ -694,7 +716,31 @@ def storeInfo(x_opt, acq_evaluated, fun):
         infoOPT["yCal"] = copy.deepcopy(y2.detach().cpu().numpy())
         infoOPT["y"] = copy.deepcopy(y.detach().cpu().numpy())
 
-    infoOPT["acq_evaluated"] = acq_evaluated
+    infoOPT["acq_evaluated"] = trace_info.get(
+        "acq_evaluated", torch.Tensor([]).to(fun.stepSettings["dfT"])
+    )
+    infoOPT["trace_label"] = trace_info.get("trace_label", "acquisition")
+    infoOPT["acquisition_metadata"] = copy.deepcopy(
+        fun.evaluators.get("acquisition_metadata", {})
+    )
+    infoOPT["has_terminal_diagnostics"] = trace_info.get(
+        "has_terminal_diagnostics",
+        infoOPT["acquisition_metadata"].get("has_terminal_diagnostics", False),
+    )
+    infoOPT["terminal_diagnostics_status"] = trace_info.get(
+        "terminal_diagnostics_status",
+        infoOPT["acquisition_metadata"].get("terminal_diagnostics_status", "unknown"),
+    )
+    x_full = trace_info.get("x_full")
+    infoOPT["x_full"] = (
+        copy.deepcopy(x_full.detach().cpu().numpy()) if x_full is not None else None
+    )
+    infoOPT["acquisition_metadata"]["has_terminal_diagnostics"] = infoOPT[
+        "has_terminal_diagnostics"
+    ]
+    infoOPT["acquisition_metadata"]["terminal_diagnostics_status"] = infoOPT[
+        "terminal_diagnostics_status"
+    ]
 
     return infoOPT
 
@@ -722,6 +768,12 @@ def plotInfo(
 
     if xypair is None:
         xypair = []
+
+    has_end_state = infoOPT.get("has_end_state", not plotStart)
+    x_end = infoOPT.get("x")
+    y_res_end = infoOPT.get("y_res")
+    y_fun_end = infoOPT.get("yFun")
+    y_cal_end = infoOPT.get("yCal")
 
     # Ranges ----------
     if plotStart:
@@ -771,21 +823,21 @@ def plotInfo(
             axOFs_r.plot(axislabels_y, yr[i, :], "s-", lw=0.5, c=color, markersize=3)
         axOFs_r.axhline(y=infoOPT["y_res_start"][0], ls="--", lw=2, c=color)
 
-    else:
-        for i in range(infoOPT["x"].shape[0]):
+    elif has_end_state and (x_end is not None) and (y_res_end is not None):
+        for i in range(x_end.shape[0]):
             axDVs_r.plot(
                 axislabels_x,
-                infoOPT["x"][i, :],
+                x_end[i, :],
                 "s-",
                 lw=0.5,
                 c=color,
                 markersize=1,
                 label=label if i == 0 else "",
             )
-        yr = np.abs(infoOPT["yFun"] - infoOPT["yCal"])
+        yr = np.abs(y_fun_end - y_cal_end)
         for i in range(yr.shape[0]):
             axOFs_r.plot(axislabels_y, yr[i, :], "s-", lw=0.5, c=color, markersize=3)
-        axOFs_r.axhline(y=infoOPT["y_res"][i], ls="--", lw=2, c=color)
+        axOFs_r.axhline(y=y_res_end[i], ls="--", lw=2, c=color)
 
     # ----------------
 
@@ -826,10 +878,10 @@ def plotInfo(
             alpha=alpha,
         )
 
-    else:
+    elif has_end_state and (x_end is not None) and (y_res_end is not None):
         # ---------- Plot DVs
         GRAPHICStools.plotMultiVariate(
-            infoOPT["x"],
+            x_end,
             axs=axDVs,
             marker="s",
             markersize=ms,
@@ -840,7 +892,7 @@ def plotInfo(
         )
         # ---------- Plot Residue
         GRAPHICStools.plotMultiVariate(
-            -np.transpose(np.atleast_2d(infoOPT["y_res"])),
+            -np.transpose(np.atleast_2d(y_res_end)),
             axs=axR,
             marker="s",
             markersize=ms,
@@ -851,7 +903,7 @@ def plotInfo(
         )
         # ---------- Plot Calibration errors
         GRAPHICStools.plotMultiVariate(
-            np.abs(infoOPT["yFun"] - infoOPT["yCal"]),
+            np.abs(y_fun_end - y_cal_end),
             axs=axOFs,
             marker="s",
             markersize=ms,
@@ -867,13 +919,13 @@ def plotInfo(
         y = (
             infoOPT["acq_evaluated"]
             if "acq_evaluated" in infoOPT
-            else infoOPT["y_res"]
+            else y_res_end
         )
     else:
         y = infoOPT["y_res_start"]
 
-    if not plotStart:
-        yo = infoOPT["y_res"][0]
+    if not plotStart and (y_res_end is not None) and (len(y_res_end) > 0):
+        yo = y_res_end[0]
     else:
         yo = infoOPT["y_res_start"][0]
 
@@ -885,7 +937,8 @@ def plotInfo(
 
     xo, summ = (x_last, len(y)) if len(y) > 0 else (x_last, 1)
 
-    xypair.append([xo, yo])
+    if yo is not None:
+        xypair.append([xo, yo])
     it_start += summ
 
     return it_start, xypair
@@ -987,7 +1040,7 @@ def summarizeSituation(previous_x, fun, new_x=None, printYN=True):
     # ------------------------------------------------------------------------
 
     previous_y = -evaluators["residual_function"](previous_x).detach()
-    previous_y_acq = evaluators["acq_function"](previous_x.unsqueeze(1)).detach()
+    previous_y_acq = evaluate_acquisition_for_summary(fun, previous_x)
     previous_yReal = -evaluators["objective"](evaluators["GP"].train_Y).detach()
 
     best_y = previous_y.min(axis=0)[0]
@@ -1005,9 +1058,12 @@ def summarizeSituation(previous_x, fun, new_x=None, printYN=True):
     # ------------------------------------------------------------------------
 
     if new_x is not None:
+        if new_x.nelement() == 0:
+            return torch.Tensor([]).to(fun.stepSettings["dfT"])
+
         # Objective
         new_y = -evaluators["residual_function"](new_x).detach()
-        new_y_acq = evaluators["acq_function"](new_x.unsqueeze(1)).detach()
+        new_y_acq = evaluate_acquisition_for_summary(fun, new_x)
         new_yReal = -evaluators["objective"](evaluators["GP"].train_Y).detach()
 
         new_best_y = new_y.min(axis=0)[0]

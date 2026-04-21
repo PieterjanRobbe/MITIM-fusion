@@ -425,7 +425,21 @@ class Transformation_Outcomes(botorch.models.transforms.outcome.Standardize):
         self.surrogate_parameters = surrogate_parameters
         self.flag_to_evaluate = True
 
-    def forward(self, X, Y, Yvar):
+    def forward(self, *args, **kwargs):
+        if len(args) == 3:
+            X, Y, Yvar = args
+        elif len(args) == 2 and "X" in kwargs:
+            Y, Yvar = args
+            X = kwargs["X"]
+        elif len(args) == 1 and "X" in kwargs:
+            Y = args[0]
+            Yvar = None
+            X = kwargs["X"]
+        else:
+            raise TypeError(
+                "[MITIM] Transformation_Outcomes.forward expects (X, Y, Yvar) or (Y, Yvar, X=...)"
+            )
+
         if (self.output is not None) and (self.flag_to_evaluate):
             factor = self.surrogate_parameters["transformationOutputs"](
                 X, self.surrogate_parameters, self.output
@@ -469,7 +483,21 @@ class ChainedOutcomeTransform(
     def __init__(self, **transforms):
         super().__init__(**transforms)
 
-    def forward(self, X, Y, Yvar):
+    def forward(self, *args, **kwargs):
+        if len(args) == 3:
+            X, Y, Yvar = args
+        elif len(args) == 2 and "X" in kwargs:
+            Y, Yvar = args
+            X = kwargs["X"]
+        elif len(args) == 1 and "X" in kwargs:
+            Y = args[0]
+            Yvar = None
+            X = kwargs["X"]
+        else:
+            raise TypeError(
+                "[MITIM] ChainedOutcomeTransform.forward expects (X, Y, Yvar) or (Y, Yvar, X=...)"
+            )
+
         for i, tf in enumerate(self.values()):
             Y, Yvar = (
                 tf.forward(X, Y, Yvar) if i == 0 else tf.forward(Y, Yvar)

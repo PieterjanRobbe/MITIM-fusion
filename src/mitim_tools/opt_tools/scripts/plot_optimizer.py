@@ -49,7 +49,7 @@ for i,step in enumerate(step_num):
 	y_acq = infoOPT[0]['info']['acq_evaluated'].cpu().numpy()
 
 	# Operate
-	acq = strat.steps[step].evaluators['acq_function']
+	acq = strat.steps[step].evaluators.get('acq_function_summary', strat.steps[step].evaluators['acq_function'])
 
 	acq_trained = np.zeros(strat.steps[step].train_X.shape[0])
 	for ix in range(strat.steps[step].train_X.shape[0]):
@@ -70,4 +70,3 @@ for i,step in enumerate(step_num):
 	ax.set_ylim(top=0.0)
 
 fn.show()
-

@@ -30,6 +30,10 @@ acquisition_options:
   type: noisy_logei_mc
   parameters:
     mc_samples: 1024
+    num_fantasies: 64
+    current_value_num_restarts: 16
+    current_value_raw_samples: 256
+    use_fixed_base_samples: true
   optimizers: ["botorch"]
   optimizer_options:
     botorch:

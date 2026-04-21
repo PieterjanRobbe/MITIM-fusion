@@ -1579,30 +1579,43 @@ class MITIM_BO:
 
             # Grab info from optimization
             infoOPT = self.steps[step].InfoOptimization
-            acq = self.steps[step].evaluators['acq_function']
+            acq = self.steps[step].evaluators.get(
+                "acq_function_summary", self.steps[step].evaluators['acq_function']
+            )
+            acquisition_metadata = self.steps[step].evaluators.get(
+                "acquisition_metadata", {}
+            )
+            summary_label = acquisition_metadata.get("summary_label", "trained")
 
             acq_trained = np.zeros(self.steps[step].train_X.shape[0])
             for ix in range(self.steps[step].train_X.shape[0]):
                 acq_trained[ix] = acq(torch.Tensor(self.steps[step].train_X[ix,:]).unsqueeze(0)).item()
 
             # Plot trained acquisition
-            ax.axhline(y=acq_trained.max(), c='k', ls='--', lw=1.0, label='max of trained')
+            ax.axhline(y=acq_trained.max(), c='k', ls='--', lw=1.0, label=f'max trained ({summary_label})')
+
+            current_value = acquisition_metadata.get("current_value")
+            if current_value is not None:
+                ax.axhline(y=current_value, c='gray', ls=':', lw=1.0, label='current value')
 
             # Plot acquisition evolution 
             for i in range(len(infoOPT)-1): #no cleanup stage
                 y_acq = infoOPT[i]['info']['acq_evaluated'].cpu().numpy()
+                trace_label = infoOPT[i]["info"].get("trace_label", infoOPT[i]["method"])
                 
-                if len(y_acq.shape)>1:
+                if len(y_acq) == 0:
+                    continue
+                elif len(y_acq.shape)>1:
                     for j in range(y_acq.shape[1]):
-                        ax.plot(y_acq[:,j],'-o', c=colors[i], markersize=0.5, lw = 0.3, label=f'{infoOPT[i]["method"]} (candidate #{j})')
+                        ax.plot(y_acq[:,j],'-o', c=colors[i], markersize=0.5, lw = 0.3, label=f'{infoOPT[i]["method"]} ({trace_label}, candidate #{j})')
                 else:
-                    ax.plot(y_acq,'-o', c=colors[i], markersize=1, lw = 0.5, label=f'{infoOPT[i]["method"]}')
+                    ax.plot(y_acq,'-o', c=colors[i], markersize=1, lw = 0.5, label=f'{infoOPT[i]["method"]} ({trace_label})')
                 
                 # Plot max of guesses
                 if len(y_acq)>0:
-                    ax.axhline(y=y_acq.max(axis=1)[0], c=colors[i], ls='--', lw=1.0, label=f'{infoOPT[i]["method"]} (max of guesses)')
+                    ax.axhline(y=np.max(y_acq), c=colors[i], ls='--', lw=1.0, label=f'{infoOPT[i]["method"]} (max of guesses)')
 
-            ax.set_title(f'BO Step #{step}')
+            ax.set_title(f'BO Step #{step} [{acquisition_metadata.get("acquisition_kind", "acq")}]')
             ax.set_ylabel('$f_{acq}$ (to max)')
             ax.set_xlabel('Evaluations')
             if step == step_num[0]:
@@ -1768,29 +1781,26 @@ class MITIM_BO:
         # Loop over posterior steps
         for ipost in range(len(info) - 1):
             iinfo = info[ipost]["info"]
-            try:
-                it_start, xypair = OPTtools.plotInfo(
-                    iinfo,
-                    label=info[ipost]["method"],
-                    plotStart=False,
-                    xypair=xypair,
-                    axTraj=ax0_r,
-                    axDVs_r=ax1_r,
-                    axOFs_r=ax2_r,
-                    axDVs=axsDVs,
-                    axOFs=axsOFs,
-                    axR=axR,
-                    axislabels_x=axislabels,
-                    axislabels_y=self.optimization_object.name_objectives,
-                    color=colors[ipost],
-                    ms=8 - ipost * 1.5,
-                    alpha=0.5,
-                    it_start=it_start,
-                )
-            except KeyError as e:
-                print(f"\t- Problem plotting {info[ipost]['method']}: ",e, typeMsg="w")
+            it_start, xypair = OPTtools.plotInfo(
+                iinfo,
+                label=info[ipost]["method"],
+                plotStart=False,
+                xypair=xypair,
+                axTraj=ax0_r,
+                axDVs_r=ax1_r,
+                axOFs_r=ax2_r,
+                axDVs=axsDVs,
+                axOFs=axsOFs,
+                axR=axR,
+                axislabels_x=axislabels,
+                axislabels_y=self.optimization_object.name_objectives,
+                color=colors[ipost],
+                ms=8 - ipost * 1.5,
+                alpha=0.5,
+                it_start=it_start,
+            )
 
-        xypair = np.array(xypair)
+        xypair = np.array(xypair) if len(xypair) > 0 else np.empty((0, 2))
 
         axsDVs[0].legend(prop={"size": 5})
         ax1_r.set_ylabel("DV values")
@@ -1801,17 +1811,19 @@ class MITIM_BO:
         GRAPHICStools.addDenseAxis(ax2_r)
         GRAPHICStools.autoscale_y(ax2_r)
 
-        ax0_r.plot(xypair[:, 0], xypair[:, 1], "-s", markersize=5, lw=2.0, c="k")
+        if xypair.shape[0] > 0:
+            ax0_r.plot(xypair[:, 0], xypair[:, 1], "-s", markersize=5, lw=2.0, c="k")
 
         iinfo = info[-1]["info"]
-        for i, y in enumerate(iinfo["y_res"]):
-            ax0_r.axhline(
-                y=y,
-                c=colors[ipost + 1],
-                ls="--",
-                lw=2,
-                label=info[-1]["method"] if i == 0 else "",
-            )
+        if "y_res" in iinfo:
+            for i, y in enumerate(iinfo["y_res"]):
+                ax0_r.axhline(
+                    y=y,
+                    c=colors[ipost + 1],
+                    ls="--",
+                    lw=2,
+                    label=info[-1]["method"] if i == 0 else "",
+                )
         iinfo = info[0]["info"]
         ax0_r.axhline(y=iinfo["y_res_start"][0], c="k", ls="--", lw=2)
 
@@ -1819,7 +1831,10 @@ class MITIM_BO:
         ax0_r.set_ylabel("$f_{acq}$")
         GRAPHICStools.addDenseAxis(ax0_r)
         ax0_r.legend(loc="best", prop={"size": 8})
-        ax0_r.set_title("Evolution of acquisition in optimization stages")
+        acquisition_kind = step.evaluators.get("acquisition_metadata", {}).get(
+            "acquisition_kind", "acquisition"
+        )
+        ax0_r.set_title(f"Evolution of acquisition in optimization stages [{acquisition_kind}]")
 
         for i in range(len(axs)):
             GRAPHICStools.addDenseAxis(axs[i])

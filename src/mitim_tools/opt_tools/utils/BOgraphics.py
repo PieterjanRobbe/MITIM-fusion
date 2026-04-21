@@ -978,6 +978,10 @@ class optimization_data:
 
         return df, df['Iteration'].item() if len(df) > 0 else None
 
+    def find_iteration(self, iteration):
+        df = self.data[self.data["Iteration"] == iteration]
+        return df, df["Iteration"].item() if len(df) > 0 else None
+
     def grab_data_point(self, x, printStuff=True):
 
         df, coincidentPoint = self.find_point(x)
@@ -1013,13 +1017,17 @@ class optimization_data:
 
         return X, Y, Ystd
 
-    def update_data_point(self,x,y,ystd,objective=np.nan):
+    def update_data_point(self, x, y, ystd, objective=np.nan, iteration=None):
 
         # Read again?
         self.data = pd.read_csv(self.file)
 
-        # Find x in the table
-        _, point = self.find_point(x)
+        # Find the row in the table. When writing evaluated results, iteration is
+        # the stable identity and avoids collapsing near-duplicate x values.
+        if iteration is not None:
+            _, point = self.find_iteration(iteration)
+        else:
+            _, point = self.find_point(x)
 
         if point is None:
             print("Point not found", typeMsg="q")
@@ -1032,28 +1040,28 @@ class optimization_data:
             # Update file
             self.data.to_csv(self.file, index=False)
 
-    def update_points(self, X, Y=np.array([]), Ystd=np.array([]),objective=None):
+    def update_points(self, X, Y=np.array([]), Ystd=np.array([]), objective=None):
 
         data_new = copy.deepcopy(self.data)
 
         for i in range(X.shape[0]):
 
-            # Does this point exist?
-            _, point = self.find_point(X[i,:])
-            
-            # If it does not exist, create a new one
+            # Preserve every optimization iteration, even when the optimizer
+            # revisits an already-seen or numerically-nearby point.
+            _, point = self.find_iteration(i)
+
             if point is None:
                 data_point = copy.deepcopy(self.data_point_dictionary)
-                data_point['Iteration'] = i
+                data_point["Iteration"] = i
 
                 for j in range(X.shape[1]):
-                    data_point[self.inputs[j]] = X[i,j]
+                    data_point[self.inputs[j]] = X[i, j]
 
                 # If the y has been provided for this x
                 if i < Y.shape[0]:
                     for j in range(len(self.outputs)):
-                        data_point[self.outputs[j]] = Y[i,j]
-                        data_point[self.outputs[j] + "_std"] = Ystd[i,j]
+                        data_point[self.outputs[j]] = Y[i, j]
+                        data_point[self.outputs[j] + "_std"] = Ystd[i, j]
 
                 # We may be in a situation where the y is not provided for this x
                 else:
@@ -1062,9 +1070,9 @@ class optimization_data:
                         data_point[self.outputs[j] + "_std"] = np.nan
 
                 if (objective is not None) and (i < len(objective)):
-                    data_point['maximization_objective'] = objective[i]
+                    data_point["maximization_objective"] = objective[i]
                 else:
-                    data_point['maximization_objective'] = np.nan
+                    data_point["maximization_objective"] = np.nan
 
                 # Check if both data_point and data_new have any non-NA values
                 if not pd.DataFrame([data_point]).isna().all().all():
@@ -1072,6 +1080,17 @@ class optimization_data:
                         data_new = pd.concat([data_new, pd.DataFrame([data_point])], ignore_index=True)
                     else:
                         data_new = pd.DataFrame([data_point])  # Initialize if data_new is all-NA
+            else:
+                for j in range(X.shape[1]):
+                    data_new.loc[point, self.inputs[j]] = X[i, j]
+
+                if i < Y.shape[0]:
+                    for j in range(len(self.outputs)):
+                        data_new.loc[point, self.outputs[j]] = Y[i, j]
+                        data_new.loc[point, self.outputs[j] + "_std"] = Ystd[i, j]
+
+                if (objective is not None) and (i < len(objective)):
+                    data_new.loc[point, "maximization_objective"] = objective[i]
 
         self.data = data_new
         self.data.to_csv(self.file, index=False)
